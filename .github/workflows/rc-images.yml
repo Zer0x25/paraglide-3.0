@@ -429,6 +429,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Descargar y validar el manifiesto de imágenes probadas
+        env:
+          RC_MANIFEST: ${{ runner.temp }}/rc-manifest.json
         run: |
           echo "RC_MANIFEST=$RUNNER_TEMP/rc-manifest.json" >> "$GITHUB_ENV"
           gh release download "$RC_TAG" --repo "$GITHUB_REPOSITORY" --pattern rc-manifest.json --dir "$RUNNER_TEMP" --clobber
