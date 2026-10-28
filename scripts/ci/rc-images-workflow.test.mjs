@@ -60,3 +60,16 @@ test('el tag de release se publica solo después de que pasen las pruebas hosped
   assert.match(publish, /current_digest/);
   assert.match(publish, /no se sobrescribe/);
 });
+
+test('la verificación del manifiesto recibe RC_MANIFEST dentro del mismo paso', () => {
+  const publish = jobBlock(rcWorkflow, 'publish');
+  const downloadStep = publish.slice(
+    publish.indexOf('- name: Descargar y validar el manifiesto de imágenes probadas'),
+    publish.indexOf('- name: Aplicar el tag RC a los digests aprobados'),
+  );
+
+  assert.match(
+    downloadStep,
+    /\n        env:\n          RC_MANIFEST: \$\{\{ runner\.temp \}\}\/rc-manifest\.json/,
+  );
+});
