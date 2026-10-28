@@ -5,6 +5,14 @@ based on [Conventional Commits](https://www.conventionalcommits.org/) and this
 file is maintained automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.12.0-rc.8](https://github.com/Zer0x25/paraglide-3.0/compare/v0.12.0-rc.7...v0.12.0-rc.8) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ci:** provide RC manifest path during verification ([d86d04f](https://github.com/Zer0x25/paraglide-3.0/commit/d86d04f36f5c23ae25b9a352d0bfbcefb25e3dde))
+* **ci:** provide RC manifest path during verification ([0e6ee00](https://github.com/Zer0x25/paraglide-3.0/commit/0e6ee0003d7ac8f8d8042102e6cb25db2ef67908))
+
 ## [0.12.0-rc.7](https://github.com/Zer0x25/paraglide-3.0/compare/v0.12.0-rc.6...v0.12.0-rc.7) (2026-10-28)
 
 
