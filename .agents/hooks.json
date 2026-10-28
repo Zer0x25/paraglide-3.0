@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./scripts/guard-dev-db.sh",
+            "command": "node \"$(git rev-parse --show-toplevel)/.agents/scripts/guard-dev-db.mjs\" --host antigravity",
             "timeout": 10
           }
         ]

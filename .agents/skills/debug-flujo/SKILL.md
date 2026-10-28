@@ -59,13 +59,14 @@ Córrelo, lee TODO, bórralo.
 
 ## Paso 5 — Verificación en el entorno del fallo
 
-- Bug de CI → push y observa el run real:
+- Bug de CI: primero reproduce desde un checkout limpio y valida localmente.
+- Un fix local no autoriza `git push`. Solo si el usuario autoriza el push para esta tarea, observa el run real:
   ```bash
-  gh run watch <id> --exit-status        # en background; sigue otra tarea mientras tanto
+  gh run watch <id> --exit-status        # sigue el run hasta el resultado
   gh run view <id> --log-failed          # solo los pasos rotos, no el log completo
   ```
-- Local verde **NO cuenta** si el fallo era de CI.
-- Si tocaste `.github/workflows/**`: valida el YAML antes de pushear. Modificar workflows exige scope `workflow`: `gh auth refresh -h github.com -s workflow` (código one-time por navegador); sin él el push se rechaza DESPUÉS de commitear.
+- Si no hay autorización para publicar, deja explícito que CI remoto sigue sin verificarse; un verde local **NO cuenta** como validación del entorno que fallaba.
+- Si tocaste `.github/workflows/**`, valida el YAML localmente. Para publicar esos cambios se requiere autorización explícita del usuario y el permiso de workflow configurado; si falta, informa el bloqueo y no intentes descubrirlo después de commitear.
 
 ## Paso 6 — Cierre y aprendizaje cuando aplique
 
