@@ -5,6 +5,19 @@ based on [Conventional Commits](https://www.conventionalcommits.org/) and this
 file is maintained automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.12.0-rc.6](https://github.com/Zer0x25/paraglide-3.0/compare/v0.12.0-rc.5...v0.12.0-rc.6) (2026-10-28)
+
+
+### Features
+
+* **governance:** add cross-runtime DB safety hooks ([84b955a](https://github.com/Zer0x25/paraglide-3.0/commit/84b955a6c0a7eb29a3a2d4e97bcf793bdab781f2))
+* **governance:** add cross-runtime DB safety hooks ([a4c6852](https://github.com/Zer0x25/paraglide-3.0/commit/a4c6852c7c7f0c6f291b36585c2e5e40cb0c0249))
+
+
+### Miscellaneous Chores
+
+* initialize paraglide-3.0 from cleaned snapshot ([6f5c5b6](https://github.com/Zer0x25/paraglide-3.0/commit/6f5c5b64c2d80bf36c965d3a2da39b6598a9e808))
+
 ## [0.12.0-rc.5](https://github.com/Zer0x25/paraglide-2.0/compare/v0.11.1-rc.5...v0.12.0-rc.5) (2026-10-21)
 
 
