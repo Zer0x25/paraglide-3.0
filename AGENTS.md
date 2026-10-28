@@ -19,6 +19,15 @@ La web conserva dependencias, alias y scripts de compatibilidad con Next.js. No 
 - No ejecutar suites `test:prod*`, cambios de despliegue ni `staging:down:volumes` sin autorización explícita.
 - Emitir eventos SSE y notificaciones solo después de que la transacción de base de datos haya confirmado.
 
+## Gobernanza y autorización de agentes
+
+- El usuario conserva la autoridad final sobre alcance, prioridades, arquitectura y decisiones de producto. Los agentes pueden analizar y proponer; no convierten inferencias, silencio ni decisiones pendientes en aprobaciones.
+- La autorización es explícita, específica para la acción y válida solo para la tarea actual. No se hereda de sesiones, tareas ni aprobaciones anteriores.
+- No hacer `commit`, `push`, `merge`, crear tags o releases, desplegar, ni cambiar settings, reglas o secretos de GitHub sin una solicitud explícita del usuario para esa acción en la tarea actual. Modificar archivos o pedir una revisión no autoriza publicar.
+- Integrar cambios a `main` mediante PR; no hacer push directo a `main`. Antes de publicar, comprobar rama, diff, checks y protección vigente; no modificar la configuración remota salvo solicitud expresa.
+- Conservar cambios ajenos a la tarea. Antes de editar, revisar el estado del árbol; antes de cerrar, revisar el diff y reportar verificaciones y límites pendientes. No descartar trabajo del usuario para dejar el árbol limpio.
+- Los hooks son defensa en profundidad, no sustituyen permisos ni aislamiento. Verificar que el runtime los cargó y confió antes de depender de ellos. La prohibición de conectarse, escribir, migrar, resetear o seedear la DB de producción en `:5678` es absoluta y prevalece aunque un hook permita el comando.
+
 ## Invariantes del dominio
 
 - Dinero: conservar `Decimal(12,2)` en persistencia y normalizar mediante `toNum()` donde corresponda; no aplicar aritmética JS directamente sobre objetos `Decimal`.

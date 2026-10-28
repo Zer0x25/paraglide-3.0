@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.agents/scripts/guard-dev-db.mjs\" --host codex",
+            "timeout": 10,
+            "statusMessage": "Verificando el destino de la base de datos"
+          }
+        ]
+      }
+    ]
+  }
+}

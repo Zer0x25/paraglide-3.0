@@ -29,7 +29,7 @@ Actúas sobre `apps/api/prisma/schema.prisma` y los `where` del backend. Fuente 
 
 ## Límites duros
 
-- **Puerto 5678 / DB `parapente_db` es PRODUCCIÓN. Prohibido escribir, migrar, seedear o conectarse.** Dev es `:5679` (`parapente_dev_db`), staging `:5680`. El hook `.agents/hooks.json` (`scripts/guard-dev-db.sh`) ya bloquea el caso obvio: no intentes rodearlo.
+- **Puerto 5678 / DB `parapente_db` es PRODUCCIÓN. Prohibido escribir, migrar, seedear o conectarse. Dev es `:5679` (`parapente_dev_db`), staging `:5680`. El adaptador común está registrado en `.agents/hooks.json` (Antigravity), `.codex/hooks.json` (Codex) y `.github/hooks/paraglide-db-guard.json` (Copilot); `npm run test:ci` valida sus contratos. Aun así, no supongas que cada runtime cargó o confió su configuración: verifícalo en ese host. El guard solo detecta patrones explícitos y complementa, no sustituye, permisos ni aislamiento. Respeta este límite aunque un hook permita el comando.
 - Nunca `prisma migrate reset`, `migrate deploy` contra prod, ni `deleteMany` físico sobre `Pasajero`, `DeslindeFirma` o `Vuelo`. El borrado de hijos es lógico (`updateMany` + `deletedAt`) antes de cualquier borrado físico.
 - No edites migraciones ya aplicadas: agrega una nueva.
 

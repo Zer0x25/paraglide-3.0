@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "command": "node \"$(git rev-parse --show-toplevel)/.agents/scripts/guard-dev-db.mjs\" --host copilot",
+        "timeoutSec": 10,
+        "matcher": "^[Bb][Aa][Ss][Hh]$"
+      }
+    ]
+  }
+}
