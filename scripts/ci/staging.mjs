@@ -108,7 +108,7 @@ async function main(command) {
     Object.entries(process.env).filter(([key]) => !/^(COMPOSE_|RC_|STAGING_)/.test(key)),
   );
   const options = { env: dockerEnv };
-  if (command === 'deploy') {
+  if (command === 'up') {
     compose(['pull', 'db', 'api', 'web'], options);
     compose(['up', '-d', '--wait', '--wait-timeout', '90', 'db'], options);
     compose(['stop', 'api', 'web'], options);
@@ -135,10 +135,12 @@ async function main(command) {
     compose(['up', '-d', '--no-build', '--wait', '--wait-timeout', '120', 'api', 'web'], options);
     await assertStagingReady(manifest);
     writeFileSync(
-      join(stateDirectory(), 'deployment.json'),
+      join(stateDirectory(), 'test-environment.json'),
       `${JSON.stringify(manifest, null, 2)}\n`,
     );
-    console.log(`RC ${manifest.tag} desplegada en staging (Web 3200 / API 3201 / DB 5680).`);
+    console.log(
+      `Entorno efímero de pruebas para ${manifest.tag} listo (Web 3200 / API 3201 / DB 5680).`,
+    );
   } else if (command === 'test') {
     await assertStagingReady(manifest);
     const env = stagingTestEnvironment(credentials, manifest.commit);

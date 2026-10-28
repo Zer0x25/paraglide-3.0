@@ -2,7 +2,7 @@ import { prisma } from '../src/plugins/prisma';
 
 // Pilar 4.3: índices que Prisma no puede expresar en schema.prisma
 // (BRIN, pg_trgm GIN, parciales). Idempotente: se puede re-ejecutar.
-// El deploy lo corre tras `prisma db push` (ver .github/workflows/deploy.yml).
+// La validación RC lo corre tras `prisma db push` (ver .github/workflows/rc-images.yml).
 async function main() {
   const sqls = [
     // Extensión trigram: habilita búsqueda textual eficiente (ILIKE '%…%')

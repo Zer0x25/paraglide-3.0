@@ -1,5 +1,5 @@
-name: RC → Staging
-run-name: "${{ github.event_name == 'workflow_dispatch' && 'Reintento manual de RC' || 'Publicar RC' }} ${{ inputs.rc_tag || github.event.release.tag_name }}"
+name: RC → GHCR
+run-name: "${{ github.event_name == 'workflow_dispatch' && 'Reprocesar RC' || 'Procesar RC' }} ${{ inputs.rc_tag || github.event.release.tag_name }}"
 
 on:
   workflow_call:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       rc_tag:
-        description: 'RC publicada a reintentar (vX.Y.Z-rc.N); despliega ese tag, no el código de la rama seleccionada'
+        description: 'RC publicada a reprocesar (vX.Y.Z-rc.N); construye, prueba y etiqueta sus imágenes sin desplegar a una VM'
         required: true
         type: string
   release:
@@ -23,9 +23,9 @@ permissions:
   pull-requests: read
   actions: read
 
-# Serializa toda la RC para que sus pruebas no coincidan con otro despliegue.
+# Serializa la publicación de una RC para evitar promociones concurrentes de sus imágenes.
 concurrency:
-  group: rc-staging
+  group: rc-images
   cancel-in-progress: false
 
 defaults:
@@ -60,7 +60,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RC_TAG: ${{ inputs.rc_tag || github.event.release.tag_name }}
         run: node scripts/ci/candidate.mjs resolve
-      - name: Identificar el código que se desplegará
+      - name: Identificar el código de las imágenes
         env:
           RC_TAG: ${{ steps.rc.outputs.tag }}
           RC_COMMIT: ${{ steps.rc.outputs.commit }}
@@ -142,7 +142,7 @@ jobs:
           file: apps/api/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ needs.resolve.outputs.image_base }}-api:${{ needs.resolve.outputs.tag }}
+          tags: ${{ needs.resolve.outputs.image_base }}-api:candidate-${{ github.run_id }}
           labels: |
             org.opencontainers.image.revision=${{ needs.resolve.outputs.commit }}
             org.opencontainers.image.version=${{ needs.resolve.outputs.tag }}
@@ -159,7 +159,7 @@ jobs:
           file: apps/web/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ needs.resolve.outputs.image_base }}-web:${{ needs.resolve.outputs.tag }}
+          tags: ${{ needs.resolve.outputs.image_base }}-web:candidate-${{ github.run_id }}
           labels: |
             org.opencontainers.image.revision=${{ needs.resolve.outputs.commit }}
             org.opencontainers.image.version=${{ needs.resolve.outputs.tag }}
@@ -189,7 +189,7 @@ jobs:
   manifest:
     name: Registrar las dos imágenes de la RC
     needs: [resolve, images]
-    # Con manifiesto previo se omite toda la matriz, pero se verifica otra vez antes de desplegar.
+    # Con manifiesto previo se omite la matriz; las imágenes por digest se vuelven a probar.
     if: always() && needs.resolve.result == 'success' && (needs.images.result == 'success' || (needs.images.result == 'skipped' && needs.resolve.outputs.manifest_exists == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -271,9 +271,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Arrancar las imágenes RC en un entorno temporal de GitHub
-        id: deploy
-        run: node scripts/ci/staging.mjs deploy
+      - name: Arrancar las imágenes RC en un entorno efímero de GitHub
+        id: test-environment
+        run: node scripts/ci/staging.mjs up
       - name: Integración HTTP y E2E en GitHub
         env:
           STAGING_TEST_ENV: ${{ runner.temp }}/staging-test.env
@@ -345,7 +345,8 @@ jobs:
           proof.runnerEnvironment = 'github-hosted';
           writeFileSync(process.env.RC_VERIFICATION, `${JSON.stringify(proof, null, 2)}\n`);
           NODE
-          echo "RC $RC_TAG validada en GitHub. La VM recibirá estos mismos digests después de aprobar las pruebas." >> "$GITHUB_STEP_SUMMARY"
+          # RC_TAG proviene de candidate.mjs, que valida su formato RC y la release antes de exportarlo.
+          echo "RC $RC_TAG validada en GitHub. GHCR recibirá el tag de release asociado a estos mismos digests después de aprobar las pruebas." >> "$GITHUB_STEP_SUMMARY"
           cat "$RC_MANIFEST" >> "$GITHUB_STEP_SUMMARY"
       - name: Publicar evidencia en la prerelease
         uses: actions/github-script@v7
@@ -377,16 +378,6 @@ jobs:
               headers: { 'content-type': 'application/json', 'content-length': data.length },
             });
             core.info(`Publicada ${name} en ${tag}.`);
-      - name: Conservar manifiesto y aprobación para la VM
-        uses: actions/upload-artifact@v4
-        with:
-          name: verified-rc-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/rc-manifest.json
-            ${{ runner.temp }}/rc-verification.json
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 14
       - name: Diagnóstico si falla el entorno temporal
         if: failure() && steps.checkout.outcome == 'success' && steps.node.outcome == 'success'
         run: node scripts/ci/staging.mjs logs
@@ -402,7 +393,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Eliminar contenedores y base de datos temporales de GitHub
-        if: always() && steps.deploy.outcome != 'skipped' && steps.checkout.outcome == 'success'
+        if: always() && steps.test-environment.outcome != 'skipped' && steps.checkout.outcome == 'success'
         run: |
           if [ -f "$STAGING_STATE_DIR/rc.env" ]; then
             docker compose --project-name paraglide-staging \
@@ -410,113 +401,79 @@ jobs:
               -f docker-compose.staging.yml down --volumes --remove-orphans
           fi
 
-  staging:
-    name: Desplegar ${{ needs.resolve.outputs.tag }} aprobada en la VM
-    needs: [resolve, test]
-    if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.test.result == 'success' }}
-    runs-on: [self-hosted, srv-hp-vm]
-    timeout-minutes: 15
-    environment:
-      name: staging
-    defaults:
-      run:
-        working-directory: ${{ github.workspace }}/rc-deploy
+  publish:
+    name: Aplicar tags de release a las imágenes probadas
+    needs: [resolve, manifest, test]
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.manifest.result == 'success' && needs.test.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      contents: write
-      packages: read
+      contents: read
+      packages: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RC_TAG: ${{ needs.resolve.outputs.tag }}
       RC_COMMIT: ${{ needs.resolve.outputs.commit }}
+      IMAGE_BASE: ${{ needs.resolve.outputs.image_base }}
     steps:
       - uses: actions/checkout@v4
-        id: checkout
         with:
           ref: ${{ needs.resolve.outputs.commit }}
-          path: rc-deploy
           persist-credentials: false
-      - uses: actions/setup-node@v4
-        id: node
-        with:
-          node-version: '22'
-      - name: Descargar únicamente el manifiesto aprobado en esta ejecución
-        uses: actions/download-artifact@v4
-        with:
-          name: verified-rc-${{ github.run_id }}
-          path: ${{ runner.temp }}/rc-approved
-      - name: Verificar aprobación, commit y digests antes de descargar imágenes
-        run: |
-          echo "RC_MANIFEST=$RUNNER_TEMP/rc-approved/rc-manifest.json" >> "$GITHUB_ENV"
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import { readFileSync } from 'node:fs';
-          import { join } from 'node:path';
-          import { validateManifest } from './scripts/ci/candidate.mjs';
-          const directory = join(process.env.RUNNER_TEMP, 'rc-approved');
-          const expected = {
-            tag: process.env.RC_TAG,
-            commit: process.env.RC_COMMIT,
-            repository: process.env.GITHUB_REPOSITORY,
-          };
-          const manifest = validateManifest(JSON.parse(readFileSync(join(directory, 'rc-manifest.json'), 'utf8')), expected);
-          const proof = validateManifest(JSON.parse(readFileSync(join(directory, 'rc-verification.json'), 'utf8')), expected);
-          assert.equal(proof.status, 'passed');
-          assert.equal(proof.runnerEnvironment, 'github-hosted');
-          assert.equal(proof.workflowRun, `${process.env.GITHUB_SERVER_URL}/${expected.repository}/actions/runs/${process.env.GITHUB_RUN_ID}`);
-          assert.deepEqual(proof.images, manifest.images);
-          for (const check of ['readiness-and-commit', 'staging-suites-01-07', 'playwright-e2e']) {
-            assert.ok(proof.checks?.includes(check), `Falta aprobación de ${check}`);
-          }
-          NODE
+      - name: Configurar Buildx para promover referencias por digest
+        uses: docker/setup-buildx-action@v3
       - name: Login GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Descargar imágenes aprobadas y actualizar staging local
-        id: deploy
-        run: node scripts/ci/staging.mjs deploy
-      - name: Registrar despliegue local y comprobación de arranque
-        env:
-          CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+      - name: Descargar y validar el manifiesto de imágenes probadas
         run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          import { join } from 'node:path';
-          const manifest = JSON.parse(readFileSync(process.env.RC_MANIFEST, 'utf8'));
-          const deployment = {
-            ...manifest,
-            status: 'deployed',
-            deployedAt: new Date().toISOString(),
-            runnerEnvironment: process.env.CI_RUNNER_ENVIRONMENT,
-            workflowRun: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
-            checks: ['readiness-and-commit'],
-          };
-          writeFileSync(join(process.env.RUNNER_TEMP, 'staging-deployment.json'), `${JSON.stringify(deployment, null, 2)}\n`);
-          NODE
-          echo "RC $RC_TAG desplegada en la VM por sus digests aprobados en GitHub. HTTP/E2E no se repiten localmente." >> "$GITHUB_STEP_SUMMARY"
-      - name: Publicar evidencia de despliegue en la prerelease
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('node:fs/promises');
-            const { owner, repo } = context.repo;
-            const { data: release } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: process.env.RC_TAG });
-            if (release.draft || !release.prerelease) throw new Error('Se requiere una prerelease publicada.');
-            const name = 'staging-deployment.json';
-            const existing = release.assets.find((asset) => asset.name === name);
-            if (existing) await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
-            const data = await fs.readFile(`${process.env.RUNNER_TEMP}/${name}`);
-            await github.rest.repos.uploadReleaseAsset({
-              owner, repo, release_id: release.id, name, data,
-              headers: { 'content-type': 'application/json', 'content-length': data.length },
-            });
-      - name: Diagnóstico si falla el despliegue local
-        if: failure() && steps.deploy.outcome == 'failure'
+          echo "RC_MANIFEST=$RUNNER_TEMP/rc-manifest.json" >> "$GITHUB_ENV"
+          gh release download "$RC_TAG" --repo "$GITHUB_REPOSITORY" --pattern rc-manifest.json --dir "$RUNNER_TEMP" --clobber
+          node scripts/ci/candidate.mjs verify
+      - name: Aplicar el tag RC a los digests aprobados
         run: |
-          if [ -f "$RUNNER_TEMP/rc-approved/rc-manifest.json" ]; then
-            export RC_MANIFEST="$RUNNER_TEMP/rc-approved/rc-manifest.json"
-            node scripts/ci/staging.mjs logs
-          fi
+          set -euo pipefail
+
+          promote_image() {
+            local service="$1"
+            local source target expected_digest current_digest metadata_file
+
+            source=$(jq -er ".images.${service}" "$RC_MANIFEST")
+            expected_digest="${source##*@}"
+            [[ "$expected_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            target="${IMAGE_BASE}-${service}:${RC_TAG}"
+
+            if current_digest=$(docker buildx imagetools inspect "$target" --format '{{json .Manifest}}' 2>/dev/null | jq -er '.digest // .Digest'); then
+              if [[ "$current_digest" != "$expected_digest" ]]; then
+                echo "El tag inmutable $target ya apunta a otro digest; no se sobrescribe." >&2
+                return 1
+              fi
+              echo "$target ya apunta al digest probado $expected_digest." >> "$GITHUB_STEP_SUMMARY"
+              return 0
+            fi
+
+            metadata_file="$RUNNER_TEMP/${service}-tag-metadata.json"
+            docker buildx imagetools create \
+              --prefer-index=false \
+              --tag "$target" \
+              --metadata-file "$metadata_file" \
+              "$source"
+            current_digest=$(jq -er '."containerimage.descriptor".digest // ."containerimage.digest"' "$metadata_file")
+            if [[ "$current_digest" != "$expected_digest" ]]; then
+              echo "La promoción de $target no conservó el digest probado." >&2
+              return 1
+            fi
+
+            current_digest=$(docker buildx imagetools inspect "$target" --format '{{json .Manifest}}' | jq -er '.digest // .Digest')
+            if [[ "$current_digest" != "$expected_digest" ]]; then
+              echo "La lectura de $target no coincide con el digest probado." >&2
+              return 1
+            fi
+            echo "$target publicado y verificado en $expected_digest." >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          promote_image api
+          promote_image web

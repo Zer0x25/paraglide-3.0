@@ -40,7 +40,7 @@ services:
       - paraglide_internal
 
   api:
-    # Imagen construida en GitHub Actions y publicada en GHCR (ver deploy.yml).
+    # Imagen construida en GitHub Actions y publicada en GHCR (ver rc-images.yml).
     # El servidor solo hace `docker compose pull`; ya no compila localmente.
     image: ${API_IMAGE:-ghcr.io/zer0x25/paraglide-2.0-api:latest}
     container_name: parapente_api
@@ -86,7 +86,7 @@ services:
       - paraglide_internal
 
   web:
-    # Imagen construida en GitHub Actions y publicada en GHCR (ver deploy.yml).
+    # Imagen construida en GitHub Actions y publicada en GHCR (ver rc-images.yml).
     image: ${WEB_IMAGE:-ghcr.io/zer0x25/paraglide-2.0-web:latest}
     container_name: parapente_web
     ports:
