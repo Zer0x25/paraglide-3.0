@@ -52,7 +52,7 @@ graph TD
 | **Shared Core** | **@parapente/shared** | Contratos de API, validaciones Zod y DTOs compilados con `tsup` compartidos entre web y API. |
 | **Testing** | **Vitest** + **Testing Library** + **Playwright** | Suite completa de pruebas unitarias/componentes en frontend y backend, más pruebas E2E en navegador real. |
 | **Observabilidad** | **OpenTelemetry** + **Prometheus** + **Sentry** | Trazas distribuidas (`traceparent`), métricas de rendimiento (`/metrics`) y captura semántica de errores. |
-| **Despliegue** | **Docker** + **GitHub Actions** + **GHCR** | Builds en CI con cache GHA, publicación de imágenes inmutables en GHCR y despliegue por pull en runner self-hosted. |
+| **Entrega de releases** | **Docker** + **GitHub Actions** + **GHCR** | API y Web se construyen y prueban en runners hospedados; solo después se publican con el tag RC en GHCR para descargarlas cuando se necesiten. Sin despliegue ni runner de VM. |
 
 ---
 
@@ -71,12 +71,12 @@ paraglide/
 ├── docs/
 │   ├── adr/          # Decisiones de arquitectura (ADR 001 al 015)
 │   ├── diagrams/     # Flujos técnicos con referencias al código
-│   └── ci-cd.md      # CI, releases candidatas y staging
+│   └── ci-cd.md      # CI, releases candidatas e imágenes en GHCR
 ├── deploy/           # Configuraciones de Caddy y proxies de producción
 ├── docker-compose.yml        # Stack completo de producción
 ├── docker-compose.dev-db.yml # Base de datos de desarrollo aislada (5679)
-├── docker-compose.staging.yml # Stack completo de preproducción/staging (Web 3200, API 3201, DB 5680)
-└── .github/workflows/        # Pipeline de validación y despliegue (deploy.yml)
+├── docker-compose.staging.yml # Entorno efímero de pruebas RC (Web 3200, API 3201, DB 5680)
+└── .github/workflows/        # CI y publicación de imágenes RC (rc-images.yml)
 ```
 
 ---
@@ -203,25 +203,31 @@ flowchart LR
     Main --> ReleasePR[PR de Release Please]
     ReleasePR --> RC[Merge: publicar vX.Y.Z-rc.N]
     RC --> Reuse["Verificar evidencia de CI; ejecutar suites si falta"]
-    Reuse --> API[Build API]
-    Reuse --> Web[Build Web]
+    Reuse --> API[Build API: tag candidato]
+    Reuse --> Web[Build Web: tag candidato]
     API --> Manifest[Manifiesto con ambos digests]
     Web --> Manifest
     Manifest --> Tests[GitHub: DB temporal + HTTP y E2E]
-    Tests -->|Aprobadas| VM[VM: descargar digests, desplegar y comprobar salud]
-    Tests -->|Fallidas| Stop[VM conserva su versión actual]
+    Tests -->|Aprobadas| Tags[GHCR: aplicar tag de release a los digests]
+    Tests -->|Fallidas| Stop[No se publica el tag de release]
 ```
 
-Solo una RC publicada construye imágenes, con API y Web en paralelo. Las pruebas
-HTTP/E2E se ejecutan en servidores de GitHub. Después de aprobarlas, el runner
-`srv-hp-vm` descarga los mismos digests y actualiza el staging local
-(Web `3200`, API `3201`); solo comprueba arranque y commit, sin repetir las suites.
-Un reintento reutiliza las imágenes, las vuelve a probar en GitHub y habilita
-el despliegue local si pasan. Las RC no actualizan `latest` ni producción.
+Solo una RC publicada construye imágenes, con API y Web en paralelo en runners
+hospedados por GitHub. Se publican primero con un tag candidato único y se prueban
+por digest en un entorno efímero de CI. Si pasan HTTP/E2E, el workflow aplica a
+los mismos digests el tag `vX.Y.Z-rc.N` en GHCR. No se usa VM ni runner
+self-hosted; las RC no actualizan `latest` ni producción.
 
-La promoción a Stable se definirá después: deberá usar las mismas imágenes que
-aprobaron HTTP/E2E en GitHub. Ver [operación de RC y configuración inicial](docs/ci-cd.md),
-incluidos los manifiestos, reintentos, evidencias y acceso al staging local.
+Para descargar una versión concreta (con acceso de lectura a los paquetes GHCR):
+
+```bash
+docker pull ghcr.io/zer0x25/paraglide-3.0-api:v0.12.0-rc.6
+docker pull ghcr.io/zer0x25/paraglide-3.0-web:v0.12.0-rc.6
+```
+
+La promoción a Stable se definirá después: deberá usar los mismos digests que
+aprobaron HTTP/E2E en GitHub. Ver [CI, publicación de imágenes RC y descargas](docs/ci-cd.md),
+incluidos los manifiestos, reintentos y evidencias.
 
 ---
 
@@ -258,8 +264,8 @@ incluidos los manifiestos, reintentos, evidencias y acceso al staging local.
 | `npm run test:mcp` | Ejecuta las pruebas unitarias del servidor MCP con Vitest |
 | `npm run test:e2e` | Ejecuta pruebas End-to-End locales con Playwright |
 | `npm run test:ci` | Valida los contratos y la reutilización de evidencia del pipeline |
-| `npm run staging:up` | Descarga y levanta staging por digest (`web :3200`, `api :3201`, `db :5680`); requiere `.env.staging` preparado según la guía de RC |
-| `npm run test:staging` | Ejecuta las siete suites HTTP/navegador (01–07); uso manual local o automático en el entorno temporal de GitHub |
+| `npm run staging:up` | Levanta manualmente un entorno local de pruebas por digest (`web :3200`, `api :3201`, `db :5680`); no lo invoca el pipeline de releases |
+| `npm run test:staging` | Ejecuta las siete suites HTTP/navegador (01–07); uso manual o automático en el entorno temporal hospedado de GitHub |
 | `npm run test:staging:mvp` | Suite de estrés y combinaciones MVP contra Staging (`:3200`) o Prod (`test:mvp:prod`) |
 | `npm run test:staging:reagenda` | Suite de estrés para re-agendamiento dinámico, concurrencia y validación de `version` |
 | `npm run test:prod` | Ejecuta la suite E2E completa de 11 pasos contra producción (`https://parapente.zer0x.org`) |
@@ -271,7 +277,7 @@ incluidos los manifiestos, reintentos, evidencias y acceso al staging local.
 ## 📚 Documentación Adicional
 
 - [Portal de Documentación](docs/README.md) — Índice de producto, arquitectura, diseño y operación.
-- [CI, Release Candidates y staging](docs/ci-cd.md) — Flujo operativo vigente, pruebas en GitHub y despliegue de imágenes aprobadas en la VM.
+- [CI, Release Candidates e imágenes GHCR](docs/ci-cd.md) — Flujo vigente, pruebas en GitHub y descarga de imágenes por tag; sin runner local ni despliegue a VM.
 - [Architecture Decision Records (ADRs)](docs/adr/README.md) — Historial de decisiones de arquitectura (ADR 001 al 015).
 - [Guía para agentes y colaboradores](AGENTS.md) — Invariantes técnicos, seguridad de DB y comandos útiles.
 

@@ -32,11 +32,11 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  stage-rc:
-    name: Publicar RC en staging
+  publish-rc-images:
+    name: Construir, probar y publicar imágenes RC
     needs: release-please
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
-    uses: ./.github/workflows/deploy.yml
+    uses: ./.github/workflows/rc-images.yml
     with:
       rc_tag: ${{ needs.release-please.outputs.tag_name }}
     secrets: inherit
