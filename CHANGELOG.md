@@ -5,6 +5,14 @@ based on [Conventional Commits](https://www.conventionalcommits.org/) and this
 file is maintained automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.12.0-rc.7](https://github.com/Zer0x25/paraglide-3.0/compare/v0.12.0-rc.6...v0.12.0-rc.7) (2026-10-28)
+
+
+### CI/CD & DevOps
+
+* **release:** publish tested RC images to GHCR ([5a4ce3b](https://github.com/Zer0x25/paraglide-3.0/commit/5a4ce3b5a7c6ebaec5f5ede5a0621530eaf52fa2))
+* **release:** publish tested RC images to GHCR ([0af6a91](https://github.com/Zer0x25/paraglide-3.0/commit/0af6a91a910d5026b643c09b8be9c0448f1034f8))
+
 ## [0.12.0-rc.6](https://github.com/Zer0x25/paraglide-3.0/compare/v0.12.0-rc.5...v0.12.0-rc.6) (2026-10-28)
 
 
