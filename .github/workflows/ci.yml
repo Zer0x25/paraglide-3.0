@@ -1,0 +1,166 @@
+name: CI (Integración Continua)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      reuse:
+        description: Reutilizar evidencia verificada del contenido actual; sin evidencia, ejecutar CI
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+      full:
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true'
+
+jobs:
+  validate:
+    # Mantener este nombre estable: es el check obligatorio de main.
+    name: CI Quality Gate ✅
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Comprobar evidencia y metadatos de release
+        id: evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_EVENT: ${{ github.event_name }}
+          CI_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          CI_HEAD_BRANCH: ${{ github.head_ref }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_REUSE: ${{ inputs.reuse }}
+        run: node scripts/ci/evidence.mjs plan
+
+      - name: Detectar módulos afectados
+        if: github.event_name == 'pull_request' && !inputs.full && steps.evidence.outputs.full != 'true' && steps.evidence.outputs.reused != 'true'
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            infrastructure:
+              - 'packages/**/!(*.md)'
+              - 'package*.json'
+              - 'tsconfig*.json'
+              - '.npmrc'
+              - '.dockerignore'
+              - '.github/workflows/**'
+              - '.github/actions/**'
+              - '.github/actionlint.yaml'
+              - 'scripts/**/!(*.md)'
+              - 'docker-compose*.yml'
+              - '**/Dockerfile'
+            api:
+              - 'apps/api/**/!(*.md)'
+            web:
+              - 'apps/web/**/!(*.md)'
+            mcp:
+              - 'apps/mcp/**/!(*.md)'
+
+      - name: Seleccionar validaciones
+        if: steps.evidence.outputs.reused != 'true'
+        id: scope
+        env:
+          FULL: ${{ inputs.full || steps.evidence.outputs.full == 'true' || github.event_name != 'pull_request' }}
+          INFRASTRUCTURE: ${{ steps.changes.outputs.infrastructure }}
+          API: ${{ steps.changes.outputs.api }}
+          WEB: ${{ steps.changes.outputs.web }}
+          MCP: ${{ steps.changes.outputs.mcp }}
+        run: node scripts/ci/candidate.mjs scope
+
+      - name: Setup Node.js
+        if: steps.scope.outputs.any == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias una vez
+        if: steps.scope.outputs.any == 'true'
+        run: npm ci --no-audit --prefer-offline --loglevel=error
+
+      - name: Validar contratos del pipeline RC
+        if: steps.scope.outputs.any == 'true'
+        run: npm run test:ci
+
+      - name: Generar cliente Prisma
+        if: steps.scope.outputs.any == 'true'
+        run: npx prisma generate --schema=apps/api/prisma/schema.prisma
+
+      - name: Compilar shared y verificar tipos
+        if: steps.scope.outputs.any == 'true'
+        run: npm run build:shared && npm run typecheck
+
+      - name: Lint Web
+        if: steps.scope.outputs.web == 'true'
+        run: npm run lint
+
+      - name: Tests API
+        if: steps.scope.outputs.api == 'true'
+        run: npm run test:api
+
+      - name: Tests Web
+        if: steps.scope.outputs.web == 'true'
+        run: npm run test:web
+
+      - name: Tests MCP
+        if: steps.scope.outputs.mcp == 'true'
+        run: npm run test:mcp
+
+      - name: Registrar el contenido y las suites aprobadas
+        if: github.event_name == 'pull_request' && steps.scope.outputs.any == 'true'
+        env:
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CI_EVIDENCE: ${{ runner.temp }}/ci-evidence.json
+          ANY: ${{ steps.scope.outputs.any }}
+          API: ${{ steps.scope.outputs.api }}
+          WEB: ${{ steps.scope.outputs.web }}
+          MCP: ${{ steps.scope.outputs.mcp }}
+        run: node scripts/ci/evidence.mjs record
+
+      - name: Conservar evidencia para la release y la RC
+        if: github.event_name == 'pull_request' && steps.scope.outputs.any == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence-${{ steps.evidence.outputs.fingerprint }}
+          path: ${{ runner.temp }}/ci-evidence.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+      - name: Resultado
+        env:
+          ANY_CODE: ${{ steps.scope.outputs.any }}
+          REUSED: ${{ steps.evidence.outputs.reused }}
+          CI_RUN: ${{ steps.evidence.outputs.ci_run }}
+        run: |
+          if [ "$REUSED" = "true" ]; then
+            echo "Contenido ya validado; evidencia verificada: $CI_RUN" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$ANY_CODE" = "true" ]; then
+            echo "Validaciones de los módulos afectados aprobadas." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Cambios de documentación: no requieren instalar dependencias ni ejecutar suites." >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -1,0 +1,1 @@
+../../.github/agents/auditor-adr.agent.md

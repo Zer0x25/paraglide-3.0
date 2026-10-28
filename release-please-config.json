@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "package-name": "paraglide",
+      "release-type": "node",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "draft": false,
+      "versioning": "prerelease",
+      "prerelease-type": "rc.1",
+      "prerelease": true,
+      "changelog-sections": [
+        { "type": "feat", "section": "Features" },
+        { "type": "fix", "section": "Bug Fixes" },
+        { "type": "perf", "section": "Performance Improvements" },
+        { "type": "revert", "section": "Reverts" },
+        { "type": "docs", "section": "Documentation", "hidden": false },
+        { "type": "chore", "section": "Miscellaneous Chores", "hidden": false },
+        { "type": "refactor", "section": "Code Refactoring", "hidden": false },
+        { "type": "ci", "section": "CI/CD & DevOps", "hidden": false }
+      ],
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "apps/api/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "apps/web/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packages/shared/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  }
+}
