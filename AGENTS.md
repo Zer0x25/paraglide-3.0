@@ -19,8 +19,9 @@ La web conserva dependencias, alias y scripts de compatibilidad con Next.js. No 
 - No ejecutar suites `test:prod*`, cambios de despliegue ni `staging:down:volumes` sin autorización explícita.
 - Emitir eventos SSE y notificaciones solo después de que la transacción de base de datos haya confirmado.
 
-## Gobernanza y autorización de agentes
+## Trabajo con agentes
 
+- Ajusta el flujo de trabajo al alcance de la petición y al estado del código. Prioriza cambios pequeños y verificables; documenta solo decisiones duraderas o instrucciones que no se deduzcan del código, los tests o los ADRs, o cuando el usuario lo solicite.
 - El usuario conserva la autoridad final sobre alcance, prioridades, arquitectura y decisiones de producto. Los agentes pueden analizar y proponer; no convierten inferencias, silencio ni decisiones pendientes en aprobaciones.
 - La autorización es explícita, específica para la acción y válida solo para la tarea actual. No se hereda de sesiones, tareas ni aprobaciones anteriores.
 - No hacer `commit`, `push`, `merge`, crear tags o releases, desplegar, ni cambiar settings, reglas o secretos de GitHub sin una solicitud explícita del usuario para esa acción en la tarea actual. Modificar archivos o pedir una revisión no autoriza publicar.
