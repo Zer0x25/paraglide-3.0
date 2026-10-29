@@ -6,15 +6,16 @@ import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persi
 import { resolveStorage } from '@/services/storage/idbStorage';
 import { ReactNode, useEffect, useState } from 'react';
 
-// Pilar 5: TanStack Query reemplaza a SWR. Defaults pensados para esta app:
-// - staleTime: los datos se sirven de caché 15s (las mutaciones y el SSE
-//   invalidan por queryKey cuando algo cambia).
+// Valores predeterminados de TanStack Query para esta aplicación:
+// - staleTime: 60s; las mutaciones y el SSE invalidan por queryKey cuando algo
+//   cambia.
 // - refetchOnWindowFocus false: el SSE de /api/eventos es quien empuja los
 //   cambios; revalidar en cada focus dispara peticiones innecesarias.
 //
-// Pilar 6: persistencia de caché en IndexedDB (asíncrono, sin límite de ~5MB,
-// sobrevive recargas). La app muestra datos inmediatamente al recargar (stale)
-// mientras revalida en segundo plano. El SW no cachea /api/* (convención ADR 009).
+// Persistencia de caché en IndexedDB, asíncrona y sujeta a la cuota del
+// navegador; evita el límite típico de localStorage y sobrevive recargas.
+// Las reglas del Service Worker para /api/* y SSE están en vite.config.ts
+// (NetworkFirst para API, NetworkOnly para eventos; ADR 009).
 // Excluimos claves sensibles/volátiles del persister.
 
 const EXCLUDED_QUERY_PREFIXES = ['auth'];

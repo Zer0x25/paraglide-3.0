@@ -1,34 +1,32 @@
-# ADR 006: Soft Delete y Enums Nativos Postgres
+# ADR 006 — Borrado lógico y enums de PostgreSQL
 
 ## Estado
-Aceptado
-
-## Fecha
-- **Aceptado**: Fase 3 (Soft delete y auditoría consistente) — 2026.
-- **Última revisión**: 2026-09-29 (alcance real de la extensión y borrados en cascada).
+Aceptado e implementado. Última revisión documental: 2026-10-29.
 
 ## Contexto
-Se requiere borrado lógico (no físico) para entidades operativas (Gasto, ConfiguracionBloque, HorarioBloque, …) y enumerables tipados de forma estricta tanto en la DB como en el cliente. Los `enum` deben estar alineados con los esquemas Zod de `@parapente/shared` para no desincronizar validaciones.
+Los registros operativos requieren conservar historial, y los valores de estado deben mantenerse alineados entre PostgreSQL y los esquemas compartidos que validan solicitudes y respuestas.
 
 ## Decisión
+### Borrado lógico
+- Los modelos incluidos en la extensión de Prisma de `apps/api/src/plugins/prisma.ts` se eliminan asignando `deletedAt`; las consultas comunes reciben `deletedAt: null` automáticamente.
+- La extensión aplica a `findMany`, `findFirst`, `count`, `aggregate` y `groupBy`. No cubre `findUnique`/`findUniqueOrThrow` ni clientes transaccionales: esas consultas deben añadir el filtro explícito cuando corresponda.
+- La inyección ocurre solo si `where.deletedAt === undefined`. Un filtro explícito permite consultar eliminados intencionalmente, por ejemplo para auditoría, restauración o generación de correlativos que no deben repetirse.
+- Las cascadas con información que debe conservarse convierten el borrado de hijos en actualizaciones de `deletedAt`; no ejecutan borrado físico.
+- Las consultas SQL directas que necesiten filas eliminadas deben expresar esa intención explícitamente.
+- Los índices parciales sobre registros activos se mantienen en `apps/api/scripts/indexes-especiales.ts`.
 
-### Soft delete (Fase 3)
-- Los modelos con `deletedAt` llevan borrado lógico. El cliente Prisma (`apps/api/src/plugins/prisma.ts`) se extiende para inyectar automáticamente `deletedAt: null` en `findMany`, `findFirst`, `count`, `aggregate` y `groupBy`.
-- **Alcance de la extensión**: no cubre `findUnique`/`findUniqueOrThrow` ni los clientes de transacción (`$transaction(async (tx) => …)`). En esos contextos el filtro `deletedAt: null` debe ir explícito en el `where`.
-- **Bypass intencional**: la inyección solo ocurre cuando `where.deletedAt === undefined`. Pasar `deletedAt: {}` o un valor explícito permite leer filas eliminadas a propósito (p. ej. para sincronizar con Google Calendar los vuelos recién eliminados, o para calcular correlativos `numeroPasajero` que no pueden repetirse).
-- **Borrados en cascada**: cuando una relación define `onDelete: Cascade` (p. ej. `Pasajero → DeslindeFirma`/`Vuelo`), el borrado de filas hijas se hace con soft-delete (`updateMany` + `deletedAt`), nunca con `deleteMany` físico, para preservar datos legales como las firmas de deslinde.
-- No se bypasea este filtro con queries crudas salvo que se quiera leer filas eliminadas explícitamente (p. ej. auditoría/restauración).
-- Index parcial `WHERE deletedAt IS NULL` para no degradar las consultas (ver ADR 005).
-
-### Enums nativos alineados con Zod (Fase 2 / integridad)
-- Se usan enums nativos de Postgres (`EstadoPago`, `EstadoVuelo`, `MetodoPago`, `TipoEquipo`, `EstadoEquipo`, `EstadoPista`, `CanalMensaje`, `CategoriaPiloto`) definidos en `schema.prisma` y reflejados como Zod en `@parapente/shared`.
-- Para migrar un enum con datos existentes se hace con `CAST` (ver `apps/api/scripts/migrar-enums.ts`), no con drop/recreate ciego de columnas.
+### Enumeraciones
+- Los enums nativos de PostgreSQL incluyen `EstadoPago`, `EstadoVuelo`, `MetodoPago`, `TipoEquipo`, `EstadoEquipo`, `EstadoPista`, `CanalMensaje` y `CategoriaPiloto`; sus valores se reflejan en los esquemas Zod de `packages/shared`.
+- La migración de enums con datos existentes conserva las filas mediante conversiones explícitas; no se reemplazan columnas con un drop/recreate ciego.
 
 ## Consecuencias
-- El borrado lógico es transparente para la mayoría del código (el filtro se inyecta).
-- Cualquier consulta que necesite incluir eliminados debe hacerlo explícitamente.
-- Los enums quedan como única fuente de verdad tipada; cambiar un valor exige migración + actualización del Zod correspondiente.
+- La mayoría de consultas de modelos cubiertos excluye eliminados de forma uniforme.
+- Toda operación que necesite incluir eliminados debe declarar su filtro; esto es especialmente importante dentro de transacciones y consultas únicas.
+- Un cambio de enum requiere actualizar el esquema de base de datos y el contrato compartido en la misma modificación.
 
-## Relaciones
-- **ADR 001** (Stack): modelo de datos y `packages/shared`.
-- **ADR 005** (Rendimiento): índices parciales sobre `deletedAt`.
+## Referencias
+- `apps/api/src/plugins/prisma.ts`.
+- `apps/api/prisma/schema.prisma` y `apps/api/scripts/migrar-enums.ts`.
+- `apps/api/scripts/indexes-especiales.ts`.
+- [ADR 005 — datos y rendimiento](005-rendimiento-datos.md).
+- [ADR 015 — esquema y baseline](015-fuente-de-verdad-esquema.md).

@@ -25,7 +25,7 @@ tools:
 
 # Rol — Guardián del contrato de datos y API
 
-Fuente de verdad: [ADR 005](../../docs/adr/005-rendimiento-datos.md), [ADR 010](../../docs/adr/010-cliente-api-tipado.md) y [apps/api/AGENTS.md](../../apps/api/AGENTS.md).
+Fuente de verdad: [ADR 005](../../docs/adr/005-rendimiento-datos.md) y [apps/api/AGENTS.md](../../apps/api/AGENTS.md).
 
 ## Colecciones (ADR 005)
 
@@ -41,8 +41,8 @@ Fuente de verdad: [ADR 005](../../docs/adr/005-rendimiento-datos.md), [ADR 010](
 ## Clientes y DTOs
 
 - Los DTOs viven en `packages/shared` (Zod). Tras editar `packages/shared`, es obligatorio `npm run build:shared`.
-- El frontend consume colecciones con `unwrapList` de `@parapente/shared`. No accedas a `.data` a mano ni improvises el sobre.
-- En tests, mockea **el sobre completo** `{ data, pagination }`; mockear solo el array rompe `unwrapList` y produce falsos verdes.
+- El adaptador `typedApi` está en `apps/web/src/services/api.ts` y expone los métodos del contrato TypeScript compartido. Las colecciones nuevas consumen `{ data, pagination }`; `unwrapList()` en el cliente queda para compatibilidad.
+- En tests, mockea **el sobre completo** `{ data, pagination }`; no uses arrays crudos como sustituto del contrato de colección.
 - No crear tipos espejo locales: si falta un tipo, se agrega al shared.
 
 ## Vistas públicas

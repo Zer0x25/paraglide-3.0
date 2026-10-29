@@ -6,8 +6,8 @@ import { useEnabledModules } from '@/modules/runtime';
 import { ModuleNotAvailable } from './ModuleNotAvailable';
 import { OfflinePageGuard } from './OfflinePageGuard';
 
-// ADR 009: módulos premium con soporte offline completo (outbox + IndexedDB)
-// como 'equipos' y 'plantillas' no deben ser bloqueados por el OfflinePageGuard.
+// ADR 009: módulos cuyas operaciones usan outbox/IndexedDB (p. ej., 'equipos'
+// y 'plantillas') no deben ser bloqueados por OfflinePageGuard.
 const OFFLINE_UNSUPPORTED_MODULES: ModuleId[] = ['reportes', 'meteorologia', 'pantalla'];
 
 export function withModule<P extends object>(id: ModuleId, Component: ComponentType<P>) {

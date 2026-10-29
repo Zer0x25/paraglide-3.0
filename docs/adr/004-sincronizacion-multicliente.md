@@ -1,81 +1,44 @@
-# ADR 004: Concurrencia Optimista Multicliente (Sincronización de Disponibilidad)
+# ADR 004 — Concurrencia y eventos entre clientes
 
 ## Estado
-Aceptado
-
-## Fecha
-- **Aceptado**: Fase 8 (Disponibilidad de Pilotos y Sincronización Multicliente) — 2026.
-- **Última revisión**: 2026-08-18 (corrección de SWR → TanStack Query y unificación de numeración).
+Aceptado; implementación parcial por endpoint. Última revisión documental: 2026-10-29.
 
 ## Contexto
-El sistema se opera desde varios dispositivos a la vez (móvil, tablet, PC del administrador, pantalla de sala). Varias personas pueden editar los **mismos datos** al mismo tiempo — por ejemplo, dos operadores modificando la disponibilidad de un mismo piloto, o más adelante el calendario y las reservas.
-
-El problema: si dos clientes cargan el mismo dato, lo editan y guardan, ¿cuál sobrevive? Con guardado ciego ("último que escribe gana") los cambios de una persona pueden pisar silenciosamente los de la otra, e incluso generar estados incoherentes (por ejemplo, un *toggle* de excepción aplicado dos veces vuelve al estado original).
-
-Opciones evaluadas:
-
-- **Bloqueo pesimista (pessimistic locking)**: bloquear el registro mientras alguien lo edita. Requiere sesión/lock en DB, tiempo de expiración y manejo de esperas; engorroso para una UI web y frágil con conexiones que se cortan.
-- **Polling periódico (30s)**: simple pero con latencia y carga innecesaria; no detecta conflictos, solo actualiza datos.
-- **Concurrencia optimista (optimistic concurrency / optimistic locking)**: el cliente carga una **versión** del dato junto con él; al guardar envía esa versión y el servidor rechaza con `409 Conflict` si la versión ya no coincide. Es la práctica moderna recomendada: sin locks, sin esperas, y el conflicto se resuelve recargando y reintentando.
-
-Se adoptó **concurrencia optimista + notificaciones push (SSE)**.
-
-## Terminología
-- **Multicliente / multi-dispositivo**: varios clientes (navegadores/equipos) conectados a la misma base de datos.
-- **Concurrencia optimista**: técnica que asume que los conflictos son raros; se detectan al guardar comparando una versión, en vez de prevenirlos con locks.
-- **Versionado**: cada registro afectado lleva un contador `version` que se incrementa en cada mutación.
+Varios clientes editan los mismos datos desde móvil, tablet y escritorio. La estrategia debe evitar sobrescrituras silenciosas, comunicar cambios confirmados y funcionar con el modelo HTTP de la web.
 
 ## Decisión
+### Concurrencia optimista
+- Las entidades sujetas a edición concurrente exponen una versión o revisión. El cliente envía el valor que leyó; una versión desactualizada debe producir `409 Conflict` y la interfaz debe recargar antes de reintentar.
+- Para garantizar que no haya una carrera entre la comparación y la escritura, ambas operaciones deben ocurrir en la misma transacción o en una actualización condicional atómica. `checkVersion()` por sí solo solo compara valores: no crea atomicidad.
+- La implementación verificada de `PUT /api/pilotos/:id/disponibilidad` lee el piloto, compara `version`, reemplaza las excepciones y bloques de las fechas enviadas y aumenta la versión en una transacción. Si difiere, no escribe y devuelve `409`.
+- El contador de `Piloto` es compartido por todas sus fechas; un cambio en una fecha puede invalidar un borrador de otra. Es un control conservador.
+- Para el guardado masivo de disponibilidad, el cliente mantiene un borrador local y envía el estado deseado (`disponible` y bloques), no una operación ambigua de alternar. Hay rutas específicas de disponibilidad que aún operan como toggle; no se consideran equivalentes al endpoint atómico.
+- El patrón se usa también en mutaciones de reserva, vuelo, pago y otros recursos versionados, pero la comparación y atomicidad deben comprobarse en cada endpoint. No se infiere cobertura transaccional completa a partir del helper común.
 
-### Modelo de datos
-- Campo `version Int @default(0)` en el modelo `Piloto` (Prisma). Cualquier mutación que afecte la disponibilidad lo incrementa: `update`, `toggleDisponibilidad`, `resetDisponibilidad`, `setBloquesDisponibilidad` y el endpoint atómico `saveDisponibilidad`.
-- La disponibilidad por bloques se guarda en `PilotoDisponibilidadBloque` (`pilotoId`, `fecha`, `horaInicio`, `horaFin`, único por `[pilotoId, fecha, horaInicio]`).
-
-### Endpoint atómico de guardado
-`PUT /api/pilotos/:id/disponibilidad`
-
-```json
-{
-  "version": 3,
-  "fechas": [
-    { "fecha": "2026-09-05", "disponible": false, "bloques": [] },
-    { "fecha": "2026-09-06", "disponible": true, "bloques": [{ "horaInicio": "10:00", "horaFin": "13:00" }] }
-  ]
-}
-```
-
-Se aplica en una **única transacción**:
-1. Lee el piloto y compara `version` con la enviada.
-2. Si no coincide → responde `409 Conflict` (no se aplica nada).
-3. Si coincide → fija cada día de forma **absoluta e idempotente** (crea/elimina la excepción según `disponible` y reemplaza los bloques), e incrementa `version`.
-
-A diferencia del antiguo `POST .../disponibilidad/toggle` (que "volteaba" el estado y era propenso a carreras), el nuevo endpoint **establece el estado deseado**: dos guardados consecutivos con el mismo valor producen el mismo resultado.
-
-### Flujo del cliente (web)
-1. Al abrir el modal de disponibilidad se captura la `version` del piloto cargada.
-2. El operador edita en un borrador local (draft); nada se persiste hasta pulsar **Guardar**.
-3. Guardar envía `{ version, fechas }` en una sola llamada.
-4. Si el servidor responde `409`, se muestra "Los datos de disponibilidad cambiaron en otro dispositivo" y se recarga; el usuario puede reintentar sobre datos frescos.
-5. Si no hay conflicto, se cierra el modal y se refrescan los datos.
-
-### Sincronización en vivo (SSE)
-Además del control de conflictos, los cambios se propagan a los otros clientes casi en tiempo real:
-
-- Endpoint `GET /api/eventos?ticket=...` (Server-Sent Events; el ticket de un solo uso se canjea por header en `POST /api/eventos/ticket` porque `EventSource` no puede mandar headers — ver [ADR 007](007-tiempo-real-sse.md)).
-- Un pub/sub en memoria (`services/eventos.service.ts`) hace `broadcast('datos-cambios')` tras cada mutación de pilotos o de configuración de bloques.
-- El hook `useDatosStream` (web) escucha el stream y dispara la invalidación quirúrgica de TanStack Query (`queryKey` `['vuelos']`, `['pilotos']`, `['configuracion-bloques']`, etc.).
+### Eventos en tiempo real
+- La sesión solicita un ticket mediante `POST /api/eventos/ticket`, autenticado por el flujo normal. El JWT no se incluye en la URL.
+- El ticket aleatorio dura cinco minutos y se consume una sola vez al abrir `GET /api/eventos?ticket=…`. Cada reconexión obtiene uno nuevo.
+- El bus SSE actual es un pub/sub en memoria de una instancia. Un reinicio invalida tickets pendientes; conexiones activas se cierran durante el apagado. Una instalación con varias réplicas necesitaría un transporte compartido.
+- El plugin emite `datos-cambios` después de respuestas 2xx de mutaciones en rutas mapeadas; excluye rutas públicas, autenticación, eventos, módulos y endpoints de cálculo. Algunas rutas emiten además invalidaciones de entidades relacionadas. La actualización de módulos usa su evento `modulos-cambios` propio.
+- `useDatosStream` mapea entidades a prefijos de `queryKey`, agrupa invalidaciones durante 300 ms y, ante una entidad desconocida o un payload ilegible, invalida toda la caché. Las reconexiones usan backoff de 3 a 30 segundos; SSE envía heartbeat cada 30 segundos.
 
 ## Consecuencias
-- **El guardado más reciente sobre datos frescos gana**; un guardado sobre datos obsoletos se rechaza explícitamente (409) en lugar de pisar en silencio.
-- Se elimina la carrera del *toggle*: el estado del día se establece de forma absoluta.
-- Sin locks ni esperas: la UX sigue siendo instantánea y el conflicto es la excepción.
-- Restricción: el 409 es estricto a nivel de piloto — si alguien cambia *cualquier* fecha del piloto, un guardado de otra fecha también obtiene 409 y debe reintentar. Es conservador y seguro; puede refinarse a granularidad fina por fecha si se necesita.
-- El patrón (versión + endpoint atómico + SSE) ya está aplicado más allá de la disponibilidad: **Reserva, Vuelo, Pago** (Fase 1), **CondicionPista, Gasto, ConfiguracionBloque, Equipo, MantenimientoEquipo** (Fase 4), y el **agendamiento de grupo** (`POST /vuelos/agendamiento-grupo` valida la `version` de la reserva → 409). El drag & drop del calendario fue removido por decisión de producto (no aportaba valor), por lo que ya no hay flujos de edición de vuelo sin control de concurrencia.
+- Los conflictos cubiertos por versión se detectan en vez de sobrescribirse silenciosamente.
+- La granularidad de versión por piloto puede causar un `409` entre ediciones de fechas distintas.
+- La seguridad de una escritura concurrente depende de la implementación concreta de la ruta, no solo del contrato de respuesta.
+- SSE reduce polling, pero el bus no distribuye eventos entre procesos.
+
+## Alternativas consideradas
+- **Bloqueo pesimista:** descartado como estrategia general por la complejidad de leases y sesiones de edición.
+- **Polling periódico:** descartado como canal principal por latencia y carga; tampoco evita conflictos.
+- **WebSockets:** SSE basta para este flujo de notificación unidireccional.
 
 ## Referencias
-- `apps/api/src/services/pilotos.service.ts` — `saveDisponibilidad`, `bumpVersion`.
-- `apps/api/src/controllers/pilotos.controller.ts` — `saveDisponibilidad` (409) y broadcasts.
-- `apps/api/src/services/eventos.service.ts` — pub/sub.
-- `apps/api/src/routes/eventos.routes.ts` — endpoint SSE.
-- `apps/web/src/hooks/useDatosStream.ts` — cliente SSE.
-- `apps/web/src/app/pilotos/page.tsx` — modal de disponibilidad con draft + versión.
+- `apps/api/src/services/concurrencia.service.ts` y servicios de dominio con control de versión.
+- `apps/api/src/services/pilotos.service.ts` (`saveDisponibilidad`).
+- `apps/api/src/plugins/broadcast.plugin.ts`.
+- `apps/api/src/services/eventos.service.ts`, `sse-tickets.service.ts` y `routes/eventos.routes.ts`.
+- `apps/web/src/hooks/useDomainMutation.ts` y `useDatosStream.ts`.
+- [ADR 003 — módulos de producto](003-modular-basica-premium.md).
+- [ADR 007 — decisión original de SSE](007-tiempo-real-sse.md).
+- [ADR 009 — persistencia y sincronización offline](009-offline-first-conflictos.md).

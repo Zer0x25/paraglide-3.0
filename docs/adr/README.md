@@ -1,55 +1,37 @@
-# Architecture Decision Records (ADRs)
+# Decisiones de arquitectura
 
-Decisiones de arquitectura aceptadas del proyecto Parapente School. Ordenadas por
-numeración estable (secuencia de decisión, no de fecha de archivo).
+Este directorio conserva las decisiones que explican la estructura y los invariantes del producto. El código y sus pruebas muestran el comportamiento vigente; los ADR registran el porqué, el alcance y las consecuencias relevantes.
 
-| # | ADR | Estado | Resumen |
-|---|-----|--------|---------|
-| 001 | [Stack y Arquitectura](./001-stack-y-arquitectura.md) | Aceptado (decisión histórica) | Stack original con Next.js 16 / Fastify 5 / PostgreSQL / Prisma / TanStack Query; el runtime Web actual usa Vite+ y React Router 7 (ver README) |
-| 002 | [Arquitectura Monorepo](./002-monorepo-y-arquitectura.md) | Aceptado | npm workspaces: `apps/web`, `apps/api`, `packages/shared` |
-| 003 | [Modular Básica vs Premium](./003-modular-basica-premium.md) | Aceptado | Activación runtime de módulos premium vía `modules.config.json` + SSE |
-| 004 | [Sincronización Multicliente](./004-sincronizacion-multicliente.md) | Aceptado | Concurrencia optimista (`version` + endpoint atómico + `409`) y SSE |
-| 005 | [Rendimiento y Datos](./005-rendimiento-datos.md) | Aceptado e implementado | Contrato de listados, TanStack Query (reemplaza SWR), keyset cursor, pushdown |
-| 006 | [Soft Delete y Enums](./006-soft-delete-enums.md) | Aceptado | Borrado lógico con `deletedAt` y enums nativos alineados con Zod |
-| 007 | [Tiempo Real (SSE)](./007-tiempo-real-sse.md) | Aceptado | Bus de eventos SSE y revalidación quirúrgica de TanStack Query |
-| 008 | [Dinero Decimal](./008-dinero-decimal.md) | Aceptado | `Decimal(12,2)` + `toNum()`; sin aritmética directa sobre `Decimal` |
-| 009 | [Offline-first y Conflictos](./009-offline-first-conflictos.md) | Aceptado e implementado | Persistencia TanStack Query en IDB + outbox en IDB + Workbox `ignoreVary` + replay dedupe |
-| 010 | [Cliente API Tipado](./010-cliente-api-tipado.md) | Aceptado e implementado | Contrato first: fetchers tipados (`typedApi`) desde los Zod de `shared` |
-| 011 | [Observabilidad](./011-observabilidad.md) | Aceptado e implementado | OTel + Prometheus (`/metrics`) + Sentry; métricas de 409 y del bus SSE |
-| 012 | [Write-Fencing Primary](./012-write-fencing-primary.md) | **Propuesto** | Dispositivo primario local: no-primary queda read-only offline (bloqueo cliente, sin backend) |
-| 013 | [Single-Session](./013-single-session.md) | Aceptado e implementado | 1 sesión viva por usuario: nuevo login revoca las anteriores vía claim `sv` y `sessionVersion` |
-| 014 | [Separación Lógica y UI](./014-separacion-logica-ui.md) | Aceptado | Patrón Headless Controller Hooks + Componentes Presentacionales; regla < 300 líneas y desacoplo de dominio |
-| 015 | [Fuente de Verdad del Esquema](./015-fuente-de-verdad-esquema.md) | Aceptado e implementado | `schema.prisma` + baseline de migraciones limpio; deploy sin `--accept-data-loss` |
+Los identificadores son estables. Cuando una decisión se integra en otra, el archivo anterior permanece como referencia breve para mantener enlaces y citas existentes; la decisión vigente se consulta en el ADR indicado como destino.
 
-## Estado de las decisiones
+## Índice
 
-- Los ADR aceptados registran decisiones; sus textos se conservan como historial, aunque la implementación evolucione.
-- **ADR 012** sigue propuesto. No representa una capacidad implementada hasta que el código la demuestre y el estado del ADR se actualice.
+| ADR | Decisión | Estado | Alcance |
+|---|---|---|---|
+| [001](001-stack-y-arquitectura.md) | Arquitectura vigente y stack | Aceptado | Workspaces, aplicaciones y contratos compartidos |
+| [002](002-monorepo-y-arquitectura.md) | Monorepo y espacios de trabajo | Consolidado en 001 | Mantiene el identificador y la decisión original |
+| [003](003-modular-basica-premium.md) | Módulos de producto | Implementado | Configuración de módulos y actualización en caliente |
+| [004](004-sincronizacion-multicliente.md) | Concurrencia y eventos entre clientes | Implementado | Versionado, `409`, tickets SSE e invalidación selectiva |
+| [005](005-rendimiento-datos.md) | Datos, rendimiento y cliente API | Implementado parcialmente | Colecciones, filtros, límites, cursores y contrato tipado |
+| [006](006-soft-delete-enums.md) | Borrado lógico y enums de PostgreSQL | Implementado | Filtros de `deletedAt`, cascadas y enums compartidos |
+| [007](007-tiempo-real-sse.md) | Eventos SSE | Consolidado en 004 | Mantiene el identificador de la decisión original |
+| [008](008-dinero-decimal.md) | Manejo de dinero con Decimal | Implementado | Precisión de persistencia, cálculo y serialización |
+| [009](009-offline-first-conflictos.md) | Lectura offline, outbox y conflictos | Implementado | Caché selectiva, replay idempotente y resolución `409` |
+| [010](010-cliente-api-tipado.md) | Cliente API tipado | Consolidado en 005 | Mantiene el identificador de la decisión original |
+| [011](011-observabilidad.md) | Observabilidad | Parcial | Métricas actuales, captura de errores y límites de trazas |
+| [012](012-write-fencing-primary.md) | Dispositivo primario local | Propuesto, no implementado | Propuesta de escritura offline desde un solo navegador |
+| [013](013-single-session.md) | Una sesión vigente por usuario | Implementado | Revocación de JWT mediante `sessionVersion` |
+| [014](014-separacion-logica-ui.md) | Separación de dominio y UI | Pauta aceptada | Responsabilidades de web y API |
+| [015](015-fuente-de-verdad-esquema.md) | Esquema y baseline | Implementado | `schema.prisma`, baseline e índices especiales |
 
-## Relaciones entre ADRs
+## Relaciones principales
 
-- **ADR 005 supersede la decisión anterior de SWR**: el fetching actual usa TanStack Query
-  (ver también ADR 004 y ADR 007).
-- **ADR 004 es la base de concurrencia** para Reservas, Vuelos, Pagos y mantenimiento;
-  los tests y la implementación vigente son la referencia de comportamiento.
-- **ADR 007 (SSE)** es el mecanismo de push que alimenta la revalidación de ADR 005 y el
-  runtime de módulos de ADR 003.
-- **ADR 006 (soft delete)** y **ADR 008 (dinero)** son decisiones transversales de
-  integridad referenciadas desde ADR 001 y ADR 005.
-- **ADR 012 (dispositivo primario)** es una capa de prevención cliente-only sobre ADR 009:
-  durante caídas, los dispositivos no-primary se bloquean en el cliente (toast, sin
-  encolar) antes de escribir, reduciendo conflictos por doble-escritura a ~0 sin
-  backend nuevo. No usa el `X-Client-Id` del server; solo un `deviceId` estable local
-  y el estado `online` de `useOnlineStatus`.
-- **ADR 013 (single-session)** es la frontera de seguridad en el server que complementa
-  al ADR 012: limita a 1 el número de JWT válidos por usuario (nuevo login revoca los
-  anteriores vía `sessionVersion`), reduciendo la superficie offline a un solo escritor
-  potencial por usuario. ADR 012 actúa durante la caída (UI); ADR 013 actúa antes
-  (al loguearse, requiere red). Se refuerzan mutuamente.
+- ADR 001 describe la estructura de aplicaciones y paquetes.
+- ADR 004 define concurrencia y propagación de eventos; ADR 009 se apoya en sus versiones y conflictos.
+- ADR 005 establece el contrato de colecciones y el cliente; ADR 009 añade persistencia y outbox.
+- ADR 006, 008 y 015 documentan invariantes relacionados con la base de datos y los importes.
+- ADR 012 sigue siendo una propuesta separada del comportamiento offline implementado en ADR 009.
 
-## Convención de numeración
+## Evolución
 
-Los números son estables: al añadir un ADR nuevo se usa el siguiente entero libre,
-independientemente de la fecha. No se reutilizan números ni se renumeran ADRs existentes
-salvo reestructuración explícita (p. ej. la fusión de los antiguos ADR 001 "Stack" y
-"Resumen de Arquitectura" en el actual ADR 001, 2026-08-18).
+No se renumeran decisiones ya publicadas. Si dos ADR comparten alcance, se consolida el contenido vigente en el identificador canónico y se deja en el otro un resumen con enlace. Cada revisión debe verificar referencias contra el código y actualizar el estado para distinguir implementación actual de propuesta.

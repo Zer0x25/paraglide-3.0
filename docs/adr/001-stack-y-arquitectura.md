@@ -1,54 +1,40 @@
-# ADR 001: Stack Tecnológico y Resumen de Arquitectura
+# ADR 001 — Arquitectura vigente y stack
 
 ## Estado
-Aceptado
-
-## Fecha
-- **Aceptado**: Fase 1 (MVP) — 2026-04-30 (primer commit del repo).
-- **Última revisión**: 2026-08-18 (fusión de los antiguos ADR 001 "Stack" y "Resumen de Arquitectura" + corrección de versiones).
+Aceptado. Última revisión documental: 2026-10-29.
 
 ## Contexto
-Construimos una aplicación de reservas de vuelos biplaza en parapente para una escuela. Debe gestionar pilotos, pasajeros y reservas de vuelos, validando y previniendo choques de horarios de pilotos. El sistema evolucionó del MVP inicial (un solo perfil Admin, sin pagos online) a un producto con roles (ADMIN/operador), pagos (`Pago`/`EstadoPago`/`MetodoPago`), módulos premium y operación multi-dispositivo concurrente.
-
-Se adopta una arquitectura de **Monorepo** para separar responsabilidades y escalar frontend/backend de forma independiente (ver ADR 002).
+Paraglide necesita mantener separadas la experiencia web, las reglas de negocio y las integraciones, a la vez que comparte contratos entre sus clientes. El repositorio ya contiene aplicaciones web, API y MCP, además de un paquete común; la documentación debe describir esa estructura real.
 
 ## Decisión
+- Mantener un monorepo con **npm workspaces**.
+- `apps/web` contiene la aplicación web. El flujo principal de desarrollo y compilación usa **Vite, React 19, React Router 7 y Tailwind CSS 4**. Se conservan archivos y comandos compatibles con Next.js para las rutas que aún los requieren; no sustituyen al flujo principal.
+- `apps/api` expone la API REST bajo `/api/*` con **Fastify 5, TypeScript, Prisma 6 y PostgreSQL 18.4**. Las reglas de dominio y el acceso a datos se resuelven en la API.
+- `apps/mcp` ofrece herramientas para clientes de agentes a través de la API, sin acceso directo a la base de datos.
+- `packages/shared` publica DTO, esquemas Zod, enumeraciones y contratos TypeScript consumidos por las aplicaciones. Se compila antes de los paquetes que lo usan.
+- La web consulta y modifica datos mediante el cliente de API y TanStack Query; los cambios entre clientes se propagan mediante SSE según ADR 004.
 
-### Stack tecnológico (versiones vigentes)
-- **Frontend**: Next.js 16 (App Router) con React 19, PWA vía `@ducanh2912/next-pwa`. Por su rendimiento modular y experiencia de desarrollo.
-- **Backend**: Node.js con Fastify 5. API REST eficiente con validación por esquemas JSON integrados.
-- **Base de Datos**: PostgreSQL 18.4 (imagen `postgres:18.4-alpine`). Motor relacional que garantiza las relaciones (vuelos -> pilotos/pasajeros).
-- **ORM**: Prisma 6. Esquematiza la BD y provee tipado en la comunicación TypeScript.
-- **Lenguaje Global**: TypeScript en todo el monorepo.
-- **Fetching (web)**: TanStack Query 5 (reemplaza a SWR desde el Pilar 5 del ADR 005).
-
-### Modelo de Datos Principal (Prisma)
-- **Piloto**: instructor/piloto. Atributos críticos: peso, licencia, prioridad de asignación, disponibilidad y `version` para concurrencia optimista (ADR 004).
-- **Pasajero**: cliente del vuelo. Atributos críticos: peso, contacto de emergencia, condición física, firma de deslinde.
-- **Vuelo**: entidad central que une Piloto y Pasajero en una Fecha/Hora, con valor pactado y estado (`AGENDADO`, `COMPLETADO`, `CANCELADO`).
-- **Reserva**: reservas grupales; múltiples Pasajeros por Reserva; gestiona pagos parciales/totales (`Pago`, `EstadoPago`, `MetodoPago`).
-- **ConfiguracionBloque & HorarioBloque**: modelado de bloques de horarios de la escuela.
-- **ExcepcionFecha / PilotoDisponibilidadBloque**: fechas/bloques en los que un piloto no está disponible.
-
-### Convenciones del Proyecto
-1. **Tipos Compartidos**: en `packages/shared` (DTOs/Zod), consumidos por `api` y `web` como `dist/` construido vía `npm run build:shared`. No duplicar tipos en los apps.
-2. **RESTful API**: el backend expone rutas estandarizadas bajo `/api/*` (`/api/vuelos`, `/api/pilotos`, etc.).
-3. **Manejo de Errores**: UI con manejo robusto de estado (sin `alert()` del navegador); errores de API traducidos a estados de UI.
-4. **Soft delete**: los modelos con `deletedAt` (Gasto, ConfiguracionBloque, HorarioBloque…) se filtran automáticamente vía extensión de Prisma (ADR 006).
-
-## Alternativas consideradas
-- **Un solo repo monolítico**: descartado — acopla frontend y backend y dificulta despliegues independientes.
-- **Repos separados**: descartado — duplica código y desincroniza tipos en desarrollo (de ahí el Monorepo, ADR 002).
-- **Otro ORM (TypeORM/Drizzle)**: Prisma elegido por experiencia de tipado y migraciones; Drizzle queda como alternativa si se requiere SQL más cercano.
-- **GraphQL**: sobre-ingeniería para este dominio; REST con filtros cubre el 100% (ADR 005).
+## Dominio y convenciones transversales
+- El modelo operativo central incluye `Piloto`, `Pasajero`, `Vuelo` y `Reserva`; pagos parciales o totales se registran en `Pago`. La programación usa bloques de horario, excepciones por fecha y disponibilidad de piloto.
+- Los modelos y DTO compartidos se definen en `packages/shared`; no se mantienen copias independientes de esos tipos en cada aplicación.
+- Las respuestas y errores de API se traducen a estados de interfaz; los componentes no usan `alert()` del navegador como manejo de errores.
+- Los modelos cubiertos por borrado lógico y sus excepciones se rigen por ADR 006. La concurrencia y los montos se rigen por ADR 004 y ADR 008.
 
 ## Consecuencias
-- La arquitectura permite iterar rápido en la web de Next.js sin alterar las reglas de negocio tipadas en el backend con Prisma.
-- `packages/shared` elimina la duplicación de DTOs; requiere reconstruir `dist/` (`build:shared`) al cambiar tipos.
-- El versionado de entidades y el soft delete son transversales y se detallan en ADR 004 y ADR 006.
+- Un solo grafo de dependencias facilita compartir tipos y ejecutar validaciones coherentes.
+- Una instalación de dependencias administra todos los workspaces; las aplicaciones conservan scripts de desarrollo y compilación propios.
+- Cambios de contrato deben mantenerse alineados entre `packages/shared`, `apps/api` y sus consumidores.
+- Las modificaciones del flujo web principal se verifican con Vite; los cambios a la compatibilidad Next.js se prueban en el flujo correspondiente.
 
-## Relaciones
-- **ADR 002** (Monorepo): estructura física que habilita este stack.
-- **ADR 004** (Sincronización): `version` en Piloto/Reserva/Vuelo/Pago.
-- **ADR 005** (Rendimiento): contrato de listados y fetching con TanStack Query.
-- **ADR 006** (Soft delete y enums): extensión Prisma que filtra `deletedAt` automáticamente.
+## Alternativas consideradas
+- **Repositorios separados:** descartados porque duplican contratos y elevan el costo de mantener versiones compatibles.
+- **pnpm/Turborepo/Nx:** no adoptados para el tamaño actual; npm workspaces cubre instalación y composición. Se puede reevaluar la caché de builds si el costo de compilación lo justifica.
+- **GraphQL:** descartado; los recursos y filtros actuales se cubren con la API REST.
+
+## Referencias
+- `package.json` y los `package.json` de cada workspace.
+- `apps/web/vite.config.ts`, `apps/api/src/app.ts`, `apps/mcp/` y `packages/shared/`.
+- [ADR 004 — concurrencia y eventos](004-sincronizacion-multicliente.md).
+- [ADR 005 — datos y cliente API](005-rendimiento-datos.md).
+- [ADR 006 — borrado lógico y enums](006-soft-delete-enums.md).
+- [ADR 008 — dinero decimal](008-dinero-decimal.md).
