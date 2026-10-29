@@ -1,48 +1,33 @@
-# ADR 011: Observabilidad — Trazas, Métricas y Errores
+# ADR 011 — Observabilidad
 
 ## Estado
-**Implementado** (2026-08-18).
-
-## Fecha
-- **Propuesta**: 2026-08-18.
+Implementación parcial. Última revisión documental: 2026-10-29.
 
 ## Contexto
-El API (Fastify/pino) ya loguea con `reqId` por request, y el web ya incluye `@sentry/nextjs` en dependencias. Pero no hay **trazas** de extremo a extremo ni **métricas** agregadas: para diagnosticar un problema de rendimiento o una falla intermitente de sincronización (SSE, `409`, outbox del ADR 009) hay que leer logs dispersos a mano, sin correlación entre web y API.
+La API necesita métricas de latencia y recursos, captura de excepciones y contexto suficiente para investigar solicitudes. La decisión original proponía observabilidad correlacionada entre web, API, SSE y outbox; la documentación debe distinguir esa dirección de lo que el código emite actualmente.
 
-En un despliegue homelab multi-servicio (Postgres, API, web, worker), se necesita una vista unificada de: latencia por endpoint, errores 4xx/5xx, fallos de concurrencia (409), y salud del bus SSE.
-
-## Decisión
-Adoptar una capa de observabilidad de tres planos:
-
-1. **Trazas (OTel)**:
-   - En el API, instrumentar Fastify con spans por request (petición HTTP → query Prisma → broadcast SSE) usando el OpenTelemetry Node SDK, manteniendo el `reqId` como `trace_id`/correlación.
-   - El web inicia el mismo `traceparent` en cada llamada al API (via interceptor axios) para correlacionar web↔API sin infraestructura nueva.
-2. **Métricas (Prometheus)**:
-   - Exponer `/metrics` en el API (sin auth, o restringido a red interna del homelab) con: latencia p50/p95/p99 por ruta, contadores de `status_code` (incluidos `409`), throughput del bus SSE (`datos-cambios`, `modulos-cambios`), y tamaño de la cola de mutaciones del outbox (ADR 009).
-   - Grafana en el homelab como dashboard (ya es el patrón del deploy Docker).
-3. **Errores (Sentry)**:
-   - Activar/consolidar `@sentry/nextjs` en el web y añadir `@sentry/node` al API para capturar excepciones no manejadas con contexto (`reqId`, entidad, `version`).
-   - Tipar los errores de negocio (409, validación Zod) para que Sentry los clasifique y no se mezclen con los 500.
-
-### Alcance
-- Primera iteración: latencia por ruta + errores 5xx/409 + salud SSE en el API; Sentry en API. Web ya tiene Sentry de deps.
-- No se añade un collector externo si no hace falta: OTel puede emitir a la consola/pino y Prometheus exponer el endpoint.
-
-## Alternativas consideradas
-- **Solo logs estructurados (pino)**: insuficiente para correlación y agregados; los logs ya existen y no bastan.
-- **Sentry solo en web**: deja la API (donde está la lógica de negocio y concurrencia) sin telemetría.
-- **Jaeger/Tempo standalone**: potente pero infra adicional; el `traceparent` + `reqId` da el 80% del valor sin coste.
+## Decisión y estado actual
+- El objetivo aceptado es instrumentar solicitudes y operaciones API con trazas OTel, propagar `traceparent` desde web, observar duración/códigos HTTP (incluido `409`) y medir actividad SSE/tamaño del outbox mediante Prometheus. Sentry recoge errores de API con contexto de solicitud; los errores esperados de validación y conflicto deben distinguirse de fallos 5xx. Un collector externo es una opción de despliegue, no un requisito de ejecución.
+- La configuración Sentry para el cliente Next-compatible se conserva; su uso desde el flujo web principal Vite debe verificarse en ese flujo antes de atribuirle captura en producción.
+- Fastify asigna un identificador de solicitud y devuelve `x-request-id`. La web agrega un encabezado `traceparent`; el plugin de observabilidad refleja el encabezado recibido en la respuesta. Esto da correlación básica, pero no acredita exportación de trazas distribuidas a un collector.
+- El plugin Prometheus recoge métricas de Node y observa duración HTTP por método, ruta normalizada y código de respuesta.
+- `GET /metrics` queda restringido al rol `ADMIN` cuando está disponible el hook de autorización.
+- Sentry está integrado en la API para captura de errores configurada por entorno.
+- `sse_broadcast_total` y `outbox_queue_size` están registrados y expuestos en el plugin; su valor operativo requiere que los productores llamen a `inc()`/`set()`. No se encontraron esas actualizaciones en los flujos actuales, por lo que no deben tratarse como métricas ya pobladas.
+- El SDK de OpenTelemetry disponible en la API opera con exportación a consola solo bajo la configuración explícita correspondiente; no hay exportador OTLP configurado como parte del flujo actual.
 
 ## Consecuencias
-- Diagnóstico end-to-end: un `reqId`/`trace_id` conecta web, API y DB para el mismo incidente.
-- Visibilidad operativa de concurrencia (409) y del bus SSE — directamente relevantes para ADR 004/007/009.
-- Coste de instrumentación acotado a un paquete por lado, sin servicios nuevos obligatorios.
+- La métrica HTTP y las métricas de proceso son observables en Prometheus con acceso administrativo.
+- Las métricas de SSE/outbox y el envío centralizado de trazas requieren completar la instrumentación antes de usarse como indicadores operativos.
+- Sentry y métricas responden a objetivos distintos: errores capturados no sustituyen métricas ni trazas.
 
-## Relaciones
-- **ADR 004/007** (Sincronización): métricas de 409 y de SSE.
-- **ADR 009** (Offline-first): métricas de la cola de mutaciones.
-- **ADR 010** (Cliente tipado): errores tipados alimentan la clasificación en Sentry.
+## Alternativas consideradas
+- **Solo logs estructurados:** insuficientes para observar distribuciones de latencia y tendencias agregadas.
+- **Collector obligatorio:** no se incorpora hasta que exista un destino y una configuración de exportación operativa.
 
 ## Referencias
-- `apps/api/src/app.ts` — logging pino con `reqId`.
-- `apps/web/package.json` — `@sentry/nextjs` ya presente.
+- `apps/api/src/plugins/observability.plugin.ts` y `apps/api/src/app.ts`.
+- `apps/web/src/services/api.ts`.
+- Configuración Sentry y OpenTelemetry de `apps/api`.
+- [ADR 004 — concurrencia y eventos](004-sincronizacion-multicliente.md).
+- [ADR 009 — offline y outbox](009-offline-first-conflictos.md).

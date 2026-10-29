@@ -1,58 +1,28 @@
-# ADR 014: Separación de Lógica y UI (Headless Controllers y Componentes Presentacionales)
+# ADR 014 — Separación de lógica de dominio y UI
 
 ## Estado
-**Aceptado** (2026-09-21).
-
-## Fecha
-- **Propuesta**: 2026-09-21.
+Aceptado el 2026-09-21 como pauta arquitectónica. Aplicación progresiva en los módulos existentes.
 
 ## Contexto
-A medida que la aplicación creció, se concentraron múltiples responsabilidades en componentes visuales y hooks individuales:
-- Hooks controladores que sobrepasan las 600–700 líneas (e.g. `useReservasController`, `usePilotosController`), mezclando orquestación de datos de servidor (TanStack Query / Outbox), gestión de estado de múltiples diálogos modales, validación de formularios dinámicos con Zod/React Hook Form, llamadas a cálculo de tarifas y formateo de mensajes externos (WhatsApp).
-- Componentes presentacionales (e.g. `ReservaCard`, `VueloModal`) que acumulan lógica de negocio derivada (cálculo de inmutabilidad, reglas de eliminación dependientes del estado de pago, sincronización de temporizadores de refresco y derivación de estados).
-- Páginas completas (e.g. `admin/users/page.tsx`, `equipos/page.tsx`, `voucher/[id]/page.tsx`) con más de 500 líneas donde la consulta a la API, los estados locales de múltiples modales y el marcado JSX conviven en un único archivo.
-
-Esta mezcla de responsabilidades incrementa la complejidad ciclomática, dificulta el testing unitario aislado sin renderizar árboles de componentes pesados y propicia el re-renderizado innecesario.
+Algunas páginas y hooks concentran consultas, formularios, modales, reglas de negocio y marcado visual. Esa combinación dificulta probar reglas por separado y hace más costoso modificar interfaces sin afectar el dominio.
 
 ## Decisión
+### Web
+- Los componentes presentacionales renderizan UI, estilos, accesibilidad y comunican acciones mediante callbacks. La carga/mutación de datos y la coordinación de formularios pertenecen a hooks controladores.
+- Los controladores pueden componerse con sub-hooks según responsabilidad: datos y filtros, modales/selección, formularios y validaciones, eventos o integraciones externas.
+- Cuando un controlador supera 300 líneas, se divide por responsabilidades; el hook orquestador busca mantenerse por debajo de 150 líneas.
+- Las reglas de dominio derivadas —por ejemplo, estados permitidos, inmutabilidad contable o condiciones de eliminación— viven en funciones puras bajo `domain/` o `utils/` y se prueban sin montar React. La cobertura objetivo para sus ramas condicionales es 100%.
 
-Adoptar formalmente una **arquitectura de separación de capas en Frontend**:
-
-### 1. Patrón Headless Controller Hook + Componente Presentacional
-- **Componentes de UI (Presentacionales)**:
-  - Responsabilidad exclusiva: renderizar marcado HTML/JSX, aplicar estilos Tailwind CSS v4, animaciones, accesibilidad (ARIA) y emitir eventos del usuario (`onClick`, `onChange`, `onSubmit`).
-  - No deben realizar queries de datos directas (`useQuery`, `typedApi`), ni mutaciones complejas, ni calcular reglas de negocio extensas dentro del cuerpo de la función JSX.
-- **Hooks Controladores (Headless)**:
-  - Responsabilidad: encapsular toda la lógica de obtención y mutación de datos (TanStack Query, Outbox), manejo de caché, revalidaciones SSE, estado local de modales y validación de formularios.
-
-### 2. Regla de Sub-Hooks Atómicos (< 300 Líneas)
-- Todo controlador que supere las 300 líneas debe modularizarse en sub-hooks especializados según su dominio:
-  - `use*Data`: obtención, paginación, filtros de servidor y debounce.
-  - `use*Modals`: gestión de visibilidad y entidad seleccionada para diálogos/modales.
-  - `use*Form`: formularios, validaciones Zod, `useFieldArray` y llamadas a cálculo de tarifas.
-  - `use*Events` / `use*External`: integraciones externas (e.g. mensajería WhatsApp, webhooks).
-- El hook principal del módulo (ej. `useReservasController`) actúa como un orquestador delgado (< 150 líneas) que compone estos sub-hooks y provee una API unificada y tipada para la vista.
-
-### 3. Extracción de Lógica de Dominio a Funciones Puras
-- Las reglas de negocio derivadas (ej. estados de tarjeta, inmutabilidad contable, si un registro puede ser eliminado según su saldo o agendamiento) deben residir en funciones puras y aisladas en `utils/` o `domain/`.
-- Permite cobertura de pruebas unitarias al 100% de las ramas condicionales sin montar componentes React ni simular DOM.
-
-### 4. Simetría Arquitectónica en Backend (`apps/api`)
-- Las rutas Fastify monolíticas que actualmente contienen consultas Prisma y lógica de negocio (e.g. `public.routes.ts`, `reportes.routes.ts`) deben migrar progresivamente a la convención estándar del proyecto:
-  $$\text{Route} \longrightarrow \text{Controller} \longrightarrow \text{Service}$$
+### API
+- Las rutas Fastify delegan progresivamente la orquestación HTTP a controladores y las reglas/acceso a datos a servicios: `route → controller → service`.
 
 ## Consecuencias
+- La UI se puede cambiar sin reimplementar las reglas de dominio.
+- Las reglas puras admiten pruebas unitarias directas; los controladores conservan la coordinación de datos y estado.
+- La división aumenta el número de archivos; se mantiene una organización predecible por módulo (`hooks/`, `components/`, `utils/` o `domain/`).
 
-### Positivas
-- **Alta testeabilidad**: Se pueden probar formularios, modales y lógica de negocio mediante tests unitarios rápidos de Vitest sin necesidad de simular el DOM del navegador.
-- **Mantenibilidad y legibilidad**: Reducción drástica del tamaño de archivos (de 700+ líneas a módulos cohesivos de 100–250 líneas).
-- **Prevención de re-renders**: El aislamiento de estados locales (como inputs o modales) evita re-renderizar listas enteras.
-- **Cumplimiento de guardrails**: Alineación estricta con las directrices de `AGENTS.md`.
-
-### Negativas / Mitigaciones
-- Mayor número de archivos por módulo: se mitiga manteniendo una convención de carpetas predecible (`hooks/`, `components/`, `utils/`).
-
-## Relaciones
-- **ADR 005 (Rendimiento y Datos)**: TanStack Query permanece confinado a los hooks de datos.
-- **ADR 009 (Offline-first y Conflictos)**: La lógica de detección de conflictos (409) y encolado outbox se mantiene en los controladores sin contaminar los componentes visuales.
-- **ADR 010 (Cliente API Tipado)**: Los sub-hooks consumen `typedApi` directamente.
+## Referencias
+- `apps/web/src/app/`, `apps/web/src/hooks/` y las carpetas `components/`/`utils/` por módulo.
+- `apps/api/src/routes/`, controladores y servicios.
+- [ADR 005 — datos y cliente API](005-rendimiento-datos.md).
+- [ADR 009 — offline y outbox](009-offline-first-conflictos.md).

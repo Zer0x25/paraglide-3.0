@@ -1,25 +1,25 @@
-# ADR 008: Manejo de Dinero con Decimal
+# ADR 008 — Manejo de dinero con Decimal
 
 ## Estado
-Aceptado
-
-## Fecha
-- **Aceptado**: Fase 4 (Integridad del esquema / hardening) — 2026.
-- **Última revisión**: 2026-08-18 (documentado; unificación de numeración).
+Aceptado e implementado. Última revisión documental: 2026-10-29.
 
 ## Contexto
-El dinero (`Pago`, importes de `Vuelo`/`Reserva`) debe ser exacto: los `float`/JS `number` introducen errores de redondeo en sumas y comparaciones. Se necesita una representación y una API de cálculo coherentes entre Prisma/Postgres y el cliente.
+Los importes deben conservar exactitud al persistirse y al realizar operaciones financieras. Los números binarios de JavaScript pueden introducir diferencias de redondeo en sumas y comparaciones.
 
 ## Decisión
-- **Tipo en DB**: `Decimal(12,2)` en `schema.prisma`.
-- **Serialización**: el API serializa el `Decimal` como `number` (serializer global en `apps/api/src/app.ts`) para que el cliente reciba un número plano.
-- **Aritmética en backend**: nunca usar `+` / `>=` / `<=` directamente sobre un `Decimal`. Usar `toNum()` desde `apps/api/src/services/money.util.ts` antes de cualquier operación, o las operaciones nativas de `Decimal.js`.
-- El cliente trata los importes como `number` para mostrar; la autoridad de cálculo y comparación vive en el backend.
+- PostgreSQL y Prisma usan `Decimal(12,2)` para los campos monetarios definidos en `schema.prisma`.
+- La API serializa los importes como `number` para los DTO que consume la web.
+- En backend, no se aplican operadores aritméticos o comparaciones de JavaScript directamente sobre una instancia Decimal. Se convierte mediante `toNum()` de `apps/api/src/services/money.util.ts` cuando la operación definida lo permite, o se usan operaciones nativas de Decimal.js.
+- La interfaz usa `number` para presentar importes; las reglas de cálculo y comparación permanecen en el backend.
+- Las agregaciones financieras se ejecutan en la base de datos cuando el servicio lo permite, sin cargar el conjunto completo en memoria.
 
 ## Consecuencias
-- Sin errores de precisión en pagos, saldos ni reportes financieros.
-- Cualquier nueva operación monetaria debe pasar por `money.util.ts`; una comparación directa `montoA >= montoB` sobre `Decimal` queda prohibida.
+- La representación persistida conserva dos decimales y un rango definido.
+- Toda nueva operación monetaria debe escoger explícitamente entre conversión controlada y aritmética Decimal; no comparar directamente dos instancias Decimal con `>=` o `<=`.
+- La serialización a `number` es un límite del contrato de API; los cálculos de autoridad no se delegan al navegador.
 
-## Relaciones
-- **ADR 001** (Stack): modelo de datos y `packages/shared` (los DTO de dinero viajan como `number`).
-- **ADR 005** (Rendimiento): las métricas financieras usan `groupBy`/`aggregate`/`$queryRaw` sobre las columnas `Decimal`.
+## Referencias
+- `apps/api/prisma/schema.prisma`.
+- `apps/api/src/app.ts` y `apps/api/src/services/money.util.ts`.
+- `packages/shared/src` para los DTO monetarios.
+- [ADR 005 — datos y rendimiento](005-rendimiento-datos.md).

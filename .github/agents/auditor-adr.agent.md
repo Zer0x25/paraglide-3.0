@@ -1,7 +1,7 @@
 ---
 name: auditor-adr
-description: "Auditoría de solo lectura del diff contra los ADRs de paraglide: dinero Decimal, concurrencia 409, soft delete, SSE post-commit, timezone, write fencing y separación UI/lógica. No edita archivos."
-argument-hint: "Ej: audita el diff actual contra ADR 004, 006, 007 y 008"
+description: "Auditoría de solo lectura del diff contra las decisiones vigentes de paraglide: dinero Decimal, concurrencia 409, soft delete, SSE, timezone, sesiones y separación UI/lógica. No edita archivos."
+argument-hint: "Ej: audita el diff actual contra ADR 004, 006, 008 y 013"
 tools:
   - search/codebase
   - search/textSearch
@@ -33,15 +33,17 @@ Empieza con `git status` y `git diff` (o `git diff <base>...HEAD`) para acotar e
 | 004 | Endpoint atómico | revisar el `$transaction` | El chequeo de versión y la escritura no viven en la misma transacción |
 | 006 | Soft delete | `grep -n "findUnique\|findUniqueOrThrow\|tx\."` en el diff | Se consulta por `findUnique` o dentro de `tx` sin `deletedAt: null` explícito |
 | 006 | Borrado de hijos | revisar flujos de borrado de `Pasajero` | Se usa `delete`/`deleteMany` físico destruyendo `DeslindeFirma` o `Vuelo` |
-| 007 | SSE post-commit | `grep -rn "broadcast\|eventos\.\|emitir"` en el diff | El evento se emite dentro de la transacción, antes del commit |
-| 012 | Write fencing (dispositivo primario) | revisar escrituras de la reserva | Un cliente no-primary escribe: offline debe ser read-only |
+| 004 | SSE post-commit | `grep -rn "broadcast\|eventos\.\|emitir"` en el diff | El evento se emite dentro de la transacción, antes del commit |
+| 012 | Propuesta local (sin regla vigente) | no aplica al gate | Sigue propuesto; no se exige como invariante |
 | 013 | Single session (`sessionVersion`) | revisar el guard de auth | Un JWT revocado sigue sirviendo peticiones |
 | TZ | Fechas | `grep -n "toISOString().slice(0, 10)"` | Se usa ese patrón en vez de `dateKeyLocal`/`getDateKey` |
-| 012 / 011 | Observabilidad | revisar logs nuevos | Se loguea PII, tokens o `DATABASE_URL` |
+| 011 | Observabilidad | revisar logs nuevos | Se loguea PII, tokens o `DATABASE_URL` |
 | 014 | Separación UI/lógica | revisar componentes | Regla de negocio (precios, cupos, estados) dentro de un componente React |
 
 ## Cómo reportar
 
 Para cada hallazgo: `archivo:línea`, el ADR violado, la evidencia (la línea exacta) y la corrección sugerida. Ordena por severidad real de impacto en producción.
+
+ADR 012 describe una propuesta sin implementar; no se usa como regla de aprobación del diff.
 
 Termina con `npm run check:quick` solo si el diff está limpio y quieres confirmar el estado base; no lo uses como sustituto de la lectura.

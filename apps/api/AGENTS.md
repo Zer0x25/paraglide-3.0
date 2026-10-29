@@ -26,4 +26,4 @@ Fastify 5 + Prisma + PostgreSQL (puerto dev 5679).
 
 ## Referencias Clave
 - ADRs de Datos: `docs/adr/005-rendimiento-datos.md`, `docs/adr/006-soft-delete-enums.md`, `docs/adr/008-dinero-decimal.md`.
-- Concurrencia y Tiempo Real: `docs/adr/004-sincronizacion-multicliente.md`, `docs/adr/007-tiempo-real-sse.md`.
+- Concurrencia y Tiempo Real: `docs/adr/004-sincronizacion-multicliente.md` (versionado, conflictos 409 y notificaciones SSE).

@@ -46,12 +46,12 @@ graph TD
 | Capa | Tecnología | Descripción |
 |------|-----------|-------------|
 | **Frontend** | **Vite+** + **React 19** + **React Router 7** + **Tailwind CSS v4** | SPA con PWA offline mediante `vite-plugin-pwa`, adaptable a móviles y tablets. La compatibilidad con Next.js se conserva para scripts heredados. |
-| **Data Fetching** | **TanStack Query v5** + **typedApi** | Cliente tipado end-to-end con revalidación quirúrgica vía SSE y caché optimista. |
+| **Data Fetching** | **TanStack Query v5** + **typedApi** | Cliente Axios con contratos TypeScript compartidos, revalidación selectiva vía SSE y caché optimista. |
 | **Backend** | **Fastify 5** + **TypeScript** | Servidor de alto rendimiento con plugins de seguridad (Helmet, Rate-limit, CORS, JWT y Pino Logger). |
 | **ORM & BD** | **Prisma 6** + **PostgreSQL 18.4 Alpine** | Enums nativos PG, dinero en `Decimal(12,2)`, soft-delete global automático e índices compuestos optimizados. |
 | **Shared Core** | **@parapente/shared** | Contratos de API, validaciones Zod y DTOs compilados con `tsup` compartidos entre web y API. |
 | **Testing** | **Vitest** + **Testing Library** + **Playwright** | Suite completa de pruebas unitarias/componentes en frontend y backend, más pruebas E2E en navegador real. |
-| **Observabilidad** | **OpenTelemetry** + **Prometheus** + **Sentry** | Trazas distribuidas (`traceparent`), métricas de rendimiento (`/metrics`) y captura semántica de errores. |
+| **Observabilidad** | **Prometheus** + **Sentry** + contexto `traceparent` | Métricas HTTP y de Node en `/metrics`, captura de errores en API y propagación básica de contexto; exportación OTel a consola es opt-in. |
 | **Entrega de releases** | **Docker** + **GitHub Actions** + **GHCR** | API y Web se construyen y prueban en runners hospedados; solo después se publican con el tag RC en GHCR para descargarlas cuando se necesiten. Sin despliegue ni runner de VM. |
 
 ---
@@ -64,6 +64,7 @@ paraglide/
 │   ├── api/          # Servidor Fastify 5 + Prisma (Puerto :3001)
 │   │   ├── prisma/   # Esquema Prisma, migraciones y seeds
 │   │   └── src/      # Controladores, servicios, plugins y rutas
+│   ├── mcp/          # Herramientas para clientes MCP sobre la API
 │   └── web/          # Aplicación Vite+ + React Router 7 + PWA (Puerto :3000)
 │       └── src/      # Rutas, componentes, hooks, store y módulos
 ├── packages/
@@ -112,14 +113,14 @@ El sistema soporta activación de módulos en **runtime y versionada en reposito
 
 ## ⚡ Concurrencia, Tiempo Real y Modo Offline
 
-1. **Server-Sent Events (SSE)**: El endpoint `GET /api/eventos?token=...` emite eventos `datos-cambios`. El hook `useDatosStream` invalida selectivamente las queries de TanStack Query correspondientes a la entidad modificada.
-2. **Concurrencia Optimista (`version Int`)**: Mutaciones críticas (disponibilidad de pilotos, reservas, vuelos, bloques) validan la versión del registro en una transacción atómica. Si hay desalineación, la API responde `409 Conflict` y la UI recarga los datos frescos.
+1. **Server-Sent Events (SSE)**: La web solicita un ticket de un solo uso por `POST /api/eventos/ticket` y conecta a `GET /api/eventos?ticket=...`; el JWT no se envía en la URL. El hook `useDatosStream` invalida selectivamente las queries de TanStack Query correspondientes a la entidad modificada.
+2. **Concurrencia Optimista (`version Int`)**: Las rutas versionadas detectan datos obsoletos y responden `409 Conflict`; `PUT /api/pilotos/:id/disponibilidad` compara y guarda en una transacción atómica. La garantía de atomicidad debe comprobarse por endpoint.
 3. **Disponibilidad por Bloques Horarios**: Asignación granular de pilotos por bloques de tiempo con soporte para arrastre táctil y selector de jornada completa o parcial.
 4. **Arquitectura Offline-First (ADR 009)**:
    - **Navegación sin conexión**: Shell SPA y rutas operativas precalentadas por Workbox, con fallback a `index.html`; las reglas de caché de API y SSE se definen en `apps/web/vite.config.ts`.
-   - **Caché en IndexedDB**: TanStack Query + Persister guardan colecciones completas en `parapente-cache` (store `kv`, retención de 7 días).
-   - **Escritura y Outbox**: Mutaciones sin conexión encoladas en IndexedDB `parapente-outbox` con UUID `X-Client-Id`; el modal se cierra fluidamente con `toast.info` y actualización optimista.
-   - **Replay Automático**: Al recuperar conectividad, el outbox se reenvía en segundo plano sin duplicados.
+   - **Caché en IndexedDB**: TanStack Query + Persister guardan las consultas permitidas por el filtro de persistencia en `parapente-cache` (store `kv`, retención máxima de 7 días; excluye `auth` y vuelos fuera del calendario).
+   - **Escritura y Outbox**: Las mutaciones marcadas con `X-Outbox: 1` se encolan en IndexedDB `parapente-outbox` con UUID `X-Client-Id`; la interfaz informa la cola y puede reflejar el cambio de forma optimista.
+   - **Replay Automático**: Al recuperar conectividad, el outbox reenvía las operaciones marcadas; el API reutiliza respuestas idempotentes ya registradas para reducir duplicados.
 
 ---
 
@@ -243,7 +244,7 @@ incluidos los manifiestos, reintentos y evidencias.
 | `GET` / `POST` | `/api/pasajeros` | Listado y registro de pasajeros |
 | `GET` / `POST` | `/api/gastos` | Registro y filtrado de gastos operacionales |
 | `GET` / `POST` | `/api/equipos` | Inventario y control de estado de equipos |
-| `GET` | `/api/eventos?token=` | Stream SSE en tiempo real (`datos-cambios`, `modulos-cambios`) |
+| `POST` / `GET` | `/api/eventos/ticket` / `/api/eventos?ticket=` | Solicitar ticket de un uso y abrir el stream SSE (`datos-cambios`, `modulos-cambios`) |
 | `GET` / `PUT` | `/api/admin/modules` | Consulta y alternancia en caliente de módulos premium |
 | `GET` | `/api/auditoria` | Registro de auditoría con cursor keyset (`nextCursor`) |
 | `POST` | `/api/agent/chat` | Interacción con el Copiloto IA SDK |

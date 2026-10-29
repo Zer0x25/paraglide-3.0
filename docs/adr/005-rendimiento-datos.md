@@ -1,89 +1,76 @@
-# ADR 005: Estrategia de Datos y Rendimiento — Contrato de Listados, Fetching y Visualización
+# ADR 005 — Datos, rendimiento y cliente API
 
 ## Estado
-Aceptado e implementado (2026-08-18) — Contrato v2 + Pilar 5 completos: SWR sacrificado por TanStack Query.
-
-## Fecha
-- **Aceptado e implementado**: 2026-08-18 (Pilar 5: TanStack Query reemplaza SWR; keyset cursor; pushdown).
+Aceptado e implementado parcialmente en los alcances descritos. Última revisión documental: 2026-10-29.
 
 ## Contexto
-Las páginas de operación (calendario, reservas, pilotos) cargan **todos** los registros de la base sin filtros ni límites: `GET /vuelos`, `GET /reservas`, `GET /pilotos`, `GET /pasajeros` devuelven la tabla completa en cada carga (el calendario dispara 5 consultas sin límite en paralelo y filtra todo en el cliente). Con meses de datos operativos esto provoca:
-
-- Queries de escaneo completo (full scan) sin usar los índices existentes (`fechaHora`, `fechaReserva`).
-- Payloads JSON enormes que saturan memoria del API y del navegador (se ha observado caída de la DB/API al cargar el calendario con 12 meses de datos).
-- Latencia creciente con el volumen; sin límites duros el sistema degrada linealmente.
-
-Se requiere una estrategia **de arquitectura** (no parches): un contrato de datos uniforme, fetching estandarizado y visualización por rango/windowing, con normas que impidan volver al anti-patrón.
+Los listados sin límites ni filtros trasladan históricos completos, elevan memoria y latencia, y dificultan mantener alineados API y clientes. Las consultas deben acotarse donde se ejecutan y exponer una respuesta estable para la web y MCP.
 
 ## Decisión
+### Contrato de colecciones
+- Toda respuesta de colección usa este envelope; los endpoints singleton y las mutaciones conservan sus contratos propios:
 
-### 1. Contrato de API para listados (todos los endpoints de colección) — v2
+  ```json
+  { "data": [], "pagination": { "page": 1, "pageSize": 100, "total": 0, "totalPages": 0, "hasMore": false, "nextPage": null, "nextCursor": null } }
+  ```
 
-`GET /{recurso}` responde SIEMPRE un envelope:
+- Los parámetros comunes son `page` (1-based, predeterminado 1), `pageSize` (predeterminado 100, máximo 500) y `sort` opcional con whitelist por recurso.
+- El envelope conserva `nextPage` para páginas por offset y `nextCursor` (nulo cuando no hay más resultados). En auditoría, la primera página offset ya entrega el cursor del último registro para continuar desde la siguiente página con keyset estable ante escrituras concurrentes.
+- Los filtros, rangos de fecha, orden y límites se aplican en la API/SQL. Los listados usan `listar()` o un equivalente especializado y toda llamada Prisma `findMany` queda acotada con `take`.
+- Las vistas temporales, especialmente calendario, consultan el rango visible y piden solo la proyección que necesitan.
+- La auditoría usa paginación keyset por `id` descendente. La primera respuesta también entrega `nextCursor`; el cursor se usa en las siguientes páginas. Actualmente el servicio también calcula `total`, por lo que el keyset evita recorrer páginas mediante offset, pero no elimina el costo del conteo.
+- Las vistas públicas identifican recursos con `tokenPublico` o `shortId`, no con identificadores secuenciales.
 
-```json
-{
-  "data": [ ... ],
-  "pagination": { "page": 1, "pageSize": 100, "total": 1234, "totalPages": 13, "hasMore": true, "nextPage": 2, "nextCursor": null }
-}
-```
+### Filtros por recurso
 
-- **Parámetros estándar** (validados con Zod en `@parapente/shared`):
-  - `page` (1-based, default 1), `pageSize` (default 100, **máximo forzado 500**).
-  - `sort` opcional `campo.desc|asc` con whitelist por recurso.
-  - **Contrato v2 — keyset `cursor`**: para listas temporales no acotadas (auditoría), `cursor=<id de la última fila>` reemplaza al offset (sin `skip` O(n) ni `totalPages` costoso). El envelope devuelve `pagination.nextCursor` (null si no hay más) y `nextPage` (offset + 1, para `useInfiniteQuery` basado en páginas). **Semántica real (implementada)**: el servidor emite `nextCursor` **también en la primera página offset** (es el id de la última fila), de modo que el cliente migra a keyset desde la página 2 — estable bajo escrituras concurrentes, sin duplicados.
-  - Filtros propios por recurso, siempre servidos por SQL (`where` de Prisma, usando índices):
-    - `vuelos`: `desde`, `hasta` (rango sobre `fechaHora`, índice compuesto `(fechaHora, estado)`), `estado`, `campos=vista-calendario` (proyección).
-    - `reservas`: `q` (nombreTitular/rutDniTitular/email/telefono/numeroReserva + pasajeros.nombre/rutDni, `contains` case-insensitive — índice GIN pg_trgm), `estado` (estadoPago), `desde`, `hasta` (fechaReserva).
-    - `pilotos`: `q` (nombre), `activo`.
-    - `pasajeros`: `q` (nombre).
-    - `equipos`: `tipo`, `estado`.
-    - `gastos`: `desde`, `hasta`.
-    - `auditoria`: `entidad`, `accion`, `busqueda`, **`cursor` (keyset por id desc)** — única lista no acotada hoy.
-- **Norma dura**: ningún `findMany` sin `take` (el helper `listar` lo fuerza); ningún filtrado/ordenación de listados en el cliente.
-- Las mutaciones (`POST/PUT/PATCH/DELETE`) no cambian. Los endpoints singleton (dashboard/stats, metricas, configuracion-bloques, disponibilidad) no cambian.
+| Recurso | Filtros y límites de consulta |
+|---|---|
+| `vuelos` | `desde`, `hasta` sobre `fechaHora`, `estado` y `campos=vista-calendario`; la grilla consulta su rango visible. |
+| `reservas` | búsqueda `q` sobre nombre/RUT del titular, email, teléfono, número de reserva y nombre/RUT de pasajeros; `estado` de pago y `desde`/`hasta` sobre `fechaReserva`. |
+| `pilotos` | `q` sobre nombre, email o teléfono y filtro `activo`. |
+| `pasajeros` | `q` sobre nombre. |
+| `equipos` | `tipo` y `estado`. |
+| `gastos` | `desde` y `hasta`. |
+| `auditoria` | entidad, acción, búsqueda y `cursor` keyset por `id` descendente. |
 
-### 2. Fetching estandarizado en el web (TanStack Query — reemplaza a SWR)
+### Acceso desde la web
+- TanStack Query es la capa de caché, consulta, mutación e invalidación selectiva; las `queryKey` son estables y describen los filtros de la consulta.
+- Se usa `useInfiniteQuery` para reservas y auditoría, invalidación por prefijo de `queryKey` para eventos SSE y el ciclo de mutación/rollback optimista de TanStack Query. Los listados nuevos no hacen fetch crudo en `useEffect` con estado local.
+- La auditoría y las reservas cargan páginas bajo demanda; el feed de auditoría usa virtualización. Las demás colecciones siguen como consultas acotadas de hasta 500 filas.
+- La consulta de calendario se limita al mes visible y usa `campos=vista-calendario`; reservas aplica rangos de fechas, estado de pago y búsqueda con debounce en el servidor. Filtros de cliente quedan para atributos derivados de datos anidados que no se puedan resolver en SQL.
+- Las agregaciones de dashboard y analíticas se calculan en el servidor mediante `groupBy`, `aggregate` o SQL cuando corresponde.
+- Los hooks de datos consumen el cliente común en `apps/web/src/services/api.ts`. El contrato TypeScript compartido está en `packages/shared/src/api.routes.ts`; es una definición estática mantenida en código, no un cliente generado desde OpenAPI ni validación runtime automática de toda respuesta.
+- `unwrapList()` se conserva para compatibilidad con respuestas antiguas y pruebas; los consumidores nuevos trabajan con el envelope.
+- Los filtros ejecutables en SQL pertenecen al servidor. El cliente puede filtrar una lista acotada solo cuando el criterio depende de datos ya cargados y no tiene una traducción útil al servidor.
 
-Decisión 2026-08-18: **SWR se sacrifica por TanStack Query** (ver Alternativas). El proyecto ya no es un MVP; TanStack aporta:
+## Alcance actual
+- Vuelos se acota por fecha y puede pedir la proyección del calendario.
+- Reservas, pilotos, pasajeros, equipos y gastos tienen límites y filtros de API según el recurso.
+- Auditoría ofrece búsqueda, filtros y cursor keyset.
+- Reservas y auditoría usan carga progresiva; otras colecciones permanecen como consultas acotadas de hasta 500 filas.
+- El contrato TypeScript compartido aún contiene campos `any` y algunas rutas usan adaptadores propios; los tipos mejoran la detección durante compilación, pero no equivalen a validación runtime completa.
 
-- **`useInfiniteQuery` first-class** (cursor u offset): listas infinitas bajo demanda con `fetchNextPage`/`hasNextPage` — el patrón de UI moderno (scroll infinito) en vez de botones de página.
-- **Invalidación quirúrgica estructurada**: `queryKey` como array serializable con **prefix matching** — el SSE de `useDatosStream` hace `invalidateQueries({ queryKey: ['vuelos', 'calendario'] })` y solo se recarga lo afectado (antes: `mutate` de strings manual).
-- **`useMutation`** con ciclo de vida completo y optimistic rollback para las mutaciones frecuentes.
-- **Devtools** (TANStack Query DevTools) y mejor inferencia de tipos; SSR/RSC maduro si hace falta prefetch.
-- **Unwrap único**: `unwrapList()` acepta array (compat tests) o envelope y devuelve `data`.
-- **Norma**: prohibido `useEffect` + `setState` + `api.get` crudo para listados; hooks con `queryKey` estable (`['vuelos', { desde, hasta }]`).
+## Consecuencias
+- El crecimiento de los datos no obliga a cargar el histórico completo en cada pantalla.
+- API, web y MCP comparten el envelope de colecciones.
+- Cualquier nuevo listado debe definir sus límites, filtros y orden permitidos en el servidor y mantener sincronizado su contrato.
 
-### 3. Visualización — Pilar 5: listas infinitas bajo demanda ✅
-
-- **Calendario scoped por mes**: `GET /vuelos?desde=&hasta=` con el rango del mes visible; refetch al navegar (nunca carga el histórico completo). ✅
-- **Listas infinitas** (`useInfiniteQuery` + `pageSize`): **auditoría** con keyset `cursor` y botón "Cargar más" (reemplaza la paginación por páginas); **reservas** con filtros server-side (tabs `PROXIMAS/PASADAS` → `desde/hasta`, búsqueda → `q` con debounce, pago → `estado`) y "Cargar más". ✅
-- **Virtualización** (`@tanstack/react-virtual`): feed de auditoría con windowing (solo se montan filas visibles). ✅
-- **Alcance deliberado**: pilotos/pasajeros/gastos/equipos/plantillas siguen en query plana (`pageSize` 500): filtran en cliente (buscar/ordenar en la página) y su escala es manejable. Convertirlos a infinito exige mover esos filtros al servidor primero (ver Norma 7). El `q` de reservas se extendió para cubrir la paridad de búsqueda del cliente (incluye pasajeros).
-- **Proyección**: el calendario pide solo los campos de la grilla (`campos=vista-calendario`). ✅
-- **Analíticas**: cómputo agregado server-side (pushdown). ✅
-
-### 4. DB y resiliencia ✅
-
-- Índice compuesto `(fechaHora, estado)` + `(fecha, categoria)` + `(estadoPago, fechaReserva)` + `(activo, prioridad)`. ✅
-- BRIN en `vuelos.fechaHora`, GIN pg_trgm en búsquedas, parcial `WHERE deletedAt IS NULL` (script `indexes-especiales.ts`). ✅
-- Pushdown de agregaciones en metricas/dashboard (`groupBy`/`aggregate`/`$queryRaw`). ✅
-- Tuning Postgres en Docker (`shared_buffers`, `work_mem`, autovacuum) + pool Prisma `?connection_limit=10` en la connection string. ✅
-- Particionado por rango para `Vuelo` solo si supera ~100k filas (futuro, no ahora).
-
-## Normas de estandarización (enforced en AGENTS.md)
-
-1. Todo listado nuevo: filtros + sort + paginación en el API con `listar()`; jamás `findMany` sin `take`.
-2. Toda query de listados en el web: hook TanStack Query con `queryKey` estable; prohibido fetch crudo en `useEffect`.
-3. Nunca traer ni filtrar en cliente conjuntos > 500 filas.
-4. Toda vista de datos temporales: siempre scoped por rango de fechas.
-5. Parámetros de query y envelope tipados en `@parapente/shared` (Zod).
-6. Listas no acotadas (auditoría): keyset `cursor`, no offset.
-7. Filtros en el cliente SOLO para atributos derivados de datos anidados no servibles (ej. agendamiento/deslinde de reservas); todo filtro mapeable a SQL viaja al servidor antes de pensar en listas infinitas.
+## Índices y evolución de escala
+- Las consultas usan índices compuestos por fecha/estado, fecha/categoría, estado de pago/fecha de reserva y actividad/prioridad, además de índices parciales para filas activas.
+- `indexes-especiales.ts` mantiene BRIN para `Vuelo.fechaHora` y GIN `pg_trgm` para búsquedas textuales; las agregaciones permanecen en la base de datos.
+- PostgreSQL en contenedor conserva los ajustes de memoria y autovacuum definidos para el entorno; el pool Prisma usa `connection_limit=10`.
+- El particionado por rango de `Vuelo` se reserva para cuando el volumen supere aproximadamente 100 000 filas.
 
 ## Alternativas consideradas
+- **GraphQL:** descartado; REST con filtros cubre las consultas actuales con menos infraestructura.
+- **Cursor en todos los listados:** reservado para conjuntos que crecen sin límite; los recursos acotados usan `page/pageSize`.
+- **Filtrado global en navegador:** descartado para históricos o conjuntos grandes por costo y resultados incompletos.
+- **SWR:** TanStack Query aporta paginación infinita, invalidación por prefijo y ciclo de mutaciones/rollback que usa la aplicación.
+- **Envelope solo cuando hay parámetros:** descartado; una única forma de respuesta reduce bifurcaciones entre clientes.
 
-- **GraphQL**: sobre-ingeniería para este dominio; REST con filtros cubre el 100% de las consultas.
-- **Cursor pagination en todo**: mejor para tablas volátiles muy grandes, pero `page/pageSize` es suficiente para las listas acotadas; keyset solo donde crece sin límite (auditoría).
-- **SWR en vez de TanStack Query**: inicialmente se estandarizó sobre SWR (caché + dedupe + revalidación SSE); **revisado 2026-08-18**: sus listas infinitas son de segunda clase (solo páginas, sin cursores), la invalidación quirúrgica es manual por strings y no tiene mutations tipadas. Al no ser ya un MVP, se migra a TanStack Query (mismo precio conceptual, más primitivas modernas). **Migración completada 2026-08-18** (commits `b206c7d`→`4b49dfa`): `swr` eliminado del package.json; los tests pasan con wrapper `src/test/render.tsx`.
-- **Envelope opcional (solo con params)**: descartado — dos formas de respuesta crean legacy y confusión.
+## Referencias
+- `apps/api/src/services/pagination.util.ts` y `apps/api/src/services/auditoria.service.ts`.
+- `packages/shared/src/api.routes.ts` y esquemas de filtros/envelopes.
+- `apps/web/src/services/api.ts`, hooks de consulta y `useDatosStream`.
+- `apps/api/scripts/indexes-especiales.ts`.
+- [ADR 009 — persistencia y sincronización offline](009-offline-first-conflictos.md).
