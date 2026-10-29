@@ -34,6 +34,6 @@ Los guards y retornos condicionales deben ir después de todos los hooks de Reac
 
 - [Sistema de diseño](../../docs/design-system.md).
 - [ADR 009 — offline y conflictos](../../docs/adr/009-offline-first-conflictos.md).
-- [ADR 010 — cliente API tipado](../../docs/adr/010-cliente-api-tipado.md).
+- [ADR 005 — datos, rendimiento y cliente API](../../docs/adr/005-rendimiento-datos.md).
 - `npm run test:web`, `npm run typecheck --workspace=web` y `npm run lint`.
 - Si se modifica UI, revisar claro/oscuro, viewport móvil de 375 px y consola del navegador.
