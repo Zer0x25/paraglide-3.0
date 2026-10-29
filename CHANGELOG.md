@@ -5,6 +5,16 @@ based on [Conventional Commits](https://www.conventionalcommits.org/) and this
 file is maintained automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.12.0-rc.9](https://github.com/Zer0x25/paraglide-3.0/compare/v0.12.0-rc.8...v0.12.0-rc.9) (2026-10-29)
+
+
+### Documentation
+
+* align workspace agent references ([1dacf99](https://github.com/Zer0x25/paraglide-3.0/commit/1dacf999ba3acf8665953248b94e7d5aa0142a22))
+* consolidate ADRs and agent guidance ([c80bab4](https://github.com/Zer0x25/paraglide-3.0/commit/c80bab4728baaac74e5836970c6f64b7a2186fdc))
+* consolidate ADRs and release guidance ([c5b198c](https://github.com/Zer0x25/paraglide-3.0/commit/c5b198c6e2fb65bf7bf0189e52f7fdb5775d5676))
+* refine agent working guide ([bed0423](https://github.com/Zer0x25/paraglide-3.0/commit/bed042364f5b492b9278639549655952d2fa020c))
+
 ## [0.12.0-rc.8](https://github.com/Zer0x25/paraglide-3.0/compare/v0.12.0-rc.7...v0.12.0-rc.8) (2026-10-28)
 
 
