@@ -1,11 +1,14 @@
 import { FastifyPluginAsync } from 'fastify';
 import { prisma } from '../plugins/prisma';
 import { toNum } from '../services/money.util';
+import { assignedReservation, pilotScope } from '../services/pilot-reservation-scope';
 import { DashboardStatsDTO, aDiaCalendario, dateKeyLocal, fechaHoraLocalToIso } from '@parapente/shared';
 
 const dashboardRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.get('/stats', async (_request, reply) => {
+  fastify.get('/stats', async (request, reply) => {
     try {
+      const pilotoId = pilotScope(request);
+      const scope = pilotoId === undefined ? {} : { reserva: assignedReservation(pilotoId) };
       // Día civil local (America/Santiago): inicio inclusivo / fin exclusivo
       const hoy = dateKeyLocal();
       const [hy, hm, hd] = hoy.split('-').map(Number);
@@ -48,17 +51,19 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify) => {
           where: {
             deletedAt: null,
             createdAt: { gte: hace30Dias },
+            ...scope,
           },
         }),
 
         // Total de vuelos
-        prisma.vuelo.count({ where: { deletedAt: null } }),
+        prisma.vuelo.count({ where: { deletedAt: null, ...scope } }),
 
         // Vuelos de hoy
         prisma.vuelo.count({
           where: {
             deletedAt: null,
             fechaHora: { gte: startOfToday, lt: endOfToday },
+            ...scope,
           },
         }),
 
@@ -68,12 +73,13 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify) => {
             deletedAt: null,
             fechaHora: { gte: endOfToday },
             estado: 'AGENDADO',
+            ...scope,
           },
         }),
 
         // 5 Reservas más recientes
         prisma.reserva.findMany({
-          where: { deletedAt: null },
+          where: pilotoId === undefined ? { deletedAt: null } : assignedReservation(pilotoId),
           take: 5,
           orderBy: { createdAt: 'desc' },
           select: {

@@ -29,8 +29,8 @@ import {
 export { calcularValor };
 
 export class ReservasService {
-  async getAll(opts: ListQuery & { q?: string; estado?: string; desde?: string; hasta?: string; sort?: string } = {}) {
-    return getAllReservas(opts);
+  async getAll(opts: ListQuery & { q?: string; estado?: string; desde?: string; hasta?: string; sort?: string } = {}, pilotoId?: number) {
+    return getAllReservas(opts, pilotoId);
   }
 
   async create(data: CreateReservaPayload) {
@@ -41,8 +41,8 @@ export class ReservasService {
     return updateReserva(id, data);
   }
 
-  async getById(id: number) {
-    return getReservaById(id);
+  async getById(id: number, pilotoId?: number) {
+    return getReservaById(id, pilotoId);
   }
 
   async addPago(reservaId: number, data: CreatePagoPayload & { version?: number }) {

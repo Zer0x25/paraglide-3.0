@@ -11,6 +11,11 @@ const reservasRoutes: FastifyPluginAsync = async (fastify) => {
       ? { preHandler: fastify.authorize(['ADMIN', 'RECEPCION']) }
       : {};
 
+  const reservationReaders: RouteShorthandOptions<any, any, any, any> =
+    typeof fastify.authorize === 'function'
+      ? { preHandler: fastify.authorize(['ADMIN', 'RECEPCION', 'PILOTO']) }
+      : {};
+
   // Fase 2: cálculo de valor (lectura pura). Registrado ANTES de /:id para que
   // Fastify no lo interprete como parámetro de ruta.
   fastify.post('/calcular-valor', adminOrRecepcion, async (request, reply) => {
@@ -30,8 +35,8 @@ const reservasRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.get('/', adminOrRecepcion, reservasController.getAll);
-  fastify.get('/:id', adminOrRecepcion, reservasController.getById);
+  fastify.get('/', reservationReaders, reservasController.getAll);
+  fastify.get('/:id', reservationReaders, reservasController.getById);
   fastify.post('/', adminOrRecepcion, reservasController.create);
   fastify.patch('/:id', adminOrRecepcion, reservasController.update);
   fastify.post('/:id/pagos', adminOrRecepcion, reservasController.addPago);

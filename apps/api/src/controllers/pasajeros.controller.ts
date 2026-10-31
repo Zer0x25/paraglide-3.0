@@ -2,17 +2,18 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { pasajerosService } from '../services/pasajeros.service';
 import { logAudit } from '../services/auditoria.service';
+import { pilotScope } from '../services/pilot-reservation-scope';
 import { PasajeroSchema, FirmaDeslindePayloadSchema } from '@parapente/shared';
 
 export class PasajerosController {
   async getAll(req: FastifyRequest<{ Querystring: Record<string, string | undefined> }>, reply: FastifyReply) {
-    const pasajeros = await pasajerosService.getAll(req.query || {});
+    const pasajeros = await pasajerosService.getAll(req.query || {}, pilotScope(req));
     return reply.send(pasajeros);
   }
 
   async getById(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const { id } = req.params;
-    const pasajero = await pasajerosService.getById(Number(id));
+    const pasajero = await pasajerosService.getById(Number(id), pilotScope(req));
     if (!pasajero) {
       return reply.status(404).send({ statusCode: 404, message: 'Pasajero no encontrado' });
     }

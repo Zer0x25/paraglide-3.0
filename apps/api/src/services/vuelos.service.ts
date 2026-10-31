@@ -8,8 +8,8 @@ export { ordenarPilotosParaAsignacion };
 export type { PilotoOrden };
 
 export class VuelosService {
-  async getAll(opts: ListQuery & { desde?: string; hasta?: string; estado?: string; sort?: string; campos?: string } = {}) {
-    return getAllVuelos(opts);
+  async getAll(opts: ListQuery & { desde?: string; hasta?: string; estado?: string; sort?: string; campos?: string } = {}, pilotoId?: number) {
+    return getAllVuelos(opts, pilotoId);
   }
 
   async validateWeightAndConflict(pilotoId: number, pasajeroId: number, fechaHora: string, excludeVueloId?: number) {

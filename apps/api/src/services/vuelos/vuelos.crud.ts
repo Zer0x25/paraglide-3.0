@@ -1,6 +1,7 @@
 import { prisma } from '../../plugins/prisma';
 import { CreateVueloPayload, horaLocalHHMM, esFechaHoraPasada } from '@parapente/shared';
 import { checkVersion } from '../concurrencia.service';
+import { assignedReservation } from '../pilot-reservation-scope';
 import { listar, parseSort, ListQuery } from '../pagination.util';
 import { broadcastDatos } from '../eventos.service';
 import { validateWeightAndConflict } from './vuelos.matching';
@@ -16,9 +17,11 @@ export async function getAllVuelos(
     sort?: string;
     campos?: string;
   } = {},
+  pilotoId?: number,
 ) {
   try {
     const where: any = { deletedAt: null };
+    if (pilotoId !== undefined) where.reserva = assignedReservation(pilotoId);
     if (opts.desde || opts.hasta) {
       where.fechaHora = {};
       if (opts.desde) where.fechaHora.gte = new Date(opts.desde);
