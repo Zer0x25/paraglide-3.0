@@ -2,10 +2,12 @@ import { prisma } from '../plugins/prisma';
 import crypto from 'crypto';
 import { PasajeroDTO, FirmaDeslindePayload } from '@parapente/shared';
 import { listar, ListQuery } from './pagination.util';
+import { assignedReservation } from './pilot-reservation-scope';
 
 export class PasajerosService {
-  async getAll(opts: ListQuery & { q?: string } = {}) {
+  async getAll(opts: ListQuery & { q?: string } = {}, pilotoId?: number) {
     const where: any = { deletedAt: null };
+    if (pilotoId !== undefined) where.reserva = assignedReservation(pilotoId);
     if (opts.q?.trim()) {
       where.OR = [
         { nombre: { contains: opts.q.trim(), mode: 'insensitive' } },
@@ -26,9 +28,9 @@ export class PasajerosService {
     );
   }
 
-  async getById(id: number) {
+  async getById(id: number, pilotoId?: number) {
     return prisma.pasajero.findUnique({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, ...(pilotoId !== undefined ? { reserva: assignedReservation(pilotoId) } : {}) },
       include: { vuelos: { where: { deletedAt: null } }, reserva: true },
     });
   }

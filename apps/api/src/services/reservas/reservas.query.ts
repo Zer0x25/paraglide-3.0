@@ -1,5 +1,6 @@
 import { prisma } from '../../plugins/prisma';
 import { listar, parseSort, ListQuery } from '../pagination.util';
+import { assignedReservation } from '../pilot-reservation-scope';
 
 const SORT_FIELDS = ['createdAt', 'fechaAgenda', 'nombreTitular'] as const;
 
@@ -11,9 +12,11 @@ export async function getAllReservas(
     hasta?: string;
     sort?: string;
   } = {},
+  pilotoId?: number,
 ) {
   try {
     const andConditions: any[] = [{ deletedAt: null }];
+    if (pilotoId !== undefined) andConditions.push(assignedReservation(pilotoId));
 
     if (opts.cursor) {
       const cursorId = Number(opts.cursor);
@@ -144,9 +147,9 @@ export async function getAllReservas(
   }
 }
 
-export async function getReservaById(id: number) {
+export async function getReservaById(id: number, pilotoId?: number) {
   return prisma.reserva.findFirst({
-    where: { id, deletedAt: null },
+    where: { id, deletedAt: null, ...(pilotoId !== undefined ? assignedReservation(pilotoId) : {}) },
     include: {
       tarifa: true,
       promocion: true,

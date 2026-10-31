@@ -2,6 +2,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { reservasService } from '../services/reservas.service';
 import { logAudit } from '../services/auditoria.service';
 import { ConflictError } from '../services/concurrencia.service';
+import { pilotScope } from '../services/pilot-reservation-scope';
 import {
   CreateReservaPayloadSchema,
   UpdateReservaPayloadSchema,
@@ -17,13 +18,13 @@ export class ReservasController {
     req: FastifyRequest<{ Querystring: Record<string, string | undefined> }>,
     reply: FastifyReply,
   ) {
-    const reservas = await reservasService.getAll(req.query);
+    const reservas = await reservasService.getAll(req.query, pilotScope(req));
     return reply.send(reservas);
   }
 
   async getById(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const { id } = req.params;
-    const reserva = await reservasService.getById(Number(id));
+    const reserva = await reservasService.getById(Number(id), pilotScope(req));
     if (!reserva) {
       return reply.code(404).send({ error: 'Reserva no encontrada' });
     }

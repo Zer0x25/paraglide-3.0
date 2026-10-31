@@ -13,7 +13,7 @@ const pasajerosRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/:id', pasajerosController.getById);
   fastify.post('/', adminOrRecepcion, pasajerosController.create);
   fastify.patch('/:id', adminOrRecepcion, pasajerosController.update);
-  fastify.post('/:id/firma', pasajerosController.guardarFirma);
+  fastify.post('/:id/firma', adminOrRecepcion, pasajerosController.guardarFirma);
   fastify.delete('/:id', onlyAdmin, pasajerosController.delete);
 };
 

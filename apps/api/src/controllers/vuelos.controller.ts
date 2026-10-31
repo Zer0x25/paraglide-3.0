@@ -3,13 +3,14 @@ import { vuelosService } from '../services/vuelos.service';
 import { logAudit } from '../services/auditoria.service';
 import { CreateVueloPayloadSchema } from '@parapente/shared';
 import { prisma } from '../plugins/prisma';
+import { pilotScope } from '../services/pilot-reservation-scope';
 
 export class VuelosController {
   async getAll(
     req: FastifyRequest<{ Querystring: Record<string, string | undefined> }>,
     reply: FastifyReply,
   ) {
-    const vuelos = await vuelosService.getAll(req.query);
+    const vuelos = await vuelosService.getAll(req.query, pilotScope(req));
     return reply.send(vuelos);
   }
 
