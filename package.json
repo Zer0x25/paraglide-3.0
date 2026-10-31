@@ -1,6 +1,6 @@
 {
   "name": "parapente-reservas-monorepo",
-  "version": "0.12.0-rc.9",
+  "version": "0.12.0-rc.10",
   "private": true,
   "workspaces": [
     "apps/*",

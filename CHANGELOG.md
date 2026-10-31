@@ -5,6 +5,14 @@ based on [Conventional Commits](https://www.conventionalcommits.org/) and this
 file is maintained automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.12.0-rc.10](https://github.com/Zer0x25/paraglide-3.0/compare/v0.12.0-rc.9...v0.12.0-rc.10) (2026-10-31)
+
+
+### Bug Fixes
+
+* **api:** scope pilot access to assigned reservations ([8ba24ed](https://github.com/Zer0x25/paraglide-3.0/commit/8ba24ed2d3604a977cf216b7a8be0bdd522f58c6))
+* **api:** scope pilot access to assigned reservations ([e50e9d0](https://github.com/Zer0x25/paraglide-3.0/commit/e50e9d0f66607c2e61b9b3a3af4cb56170c65da2))
+
 ## [0.12.0-rc.9](https://github.com/Zer0x25/paraglide-3.0/compare/v0.12.0-rc.8...v0.12.0-rc.9) (2026-10-29)
 
 
